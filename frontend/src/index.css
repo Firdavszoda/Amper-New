@@ -1,0 +1,16 @@
+@import "tailwindcss";
+
+/* Регистрируем наши кастомные цвета прямо в теме Tailwind */
+@theme {
+  --color-app-bg: #0f172a;
+  --color-app-card: #1e293b;
+  --color-app-border: #334155;
+  --color-app-accent: #3b82f6;
+  --color-app-muted: #94a3b8;
+  --color-app-danger: #ef4444;
+}
+
+/* Настройки для всего приложения (светлая/темная тема) */
+body {
+  @apply bg-gray-50 dark:bg-app-bg text-gray-900 dark:text-white antialiased transition-colors duration-300;
+}
