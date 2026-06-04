@@ -40,4 +40,9 @@ export interface ActiveTransaction {
   amount_tjs: number;
   is_full_tank: boolean;
   start_time: string;
+  soc?: number;      // State of Charge (%)
+  current_a?: number; // Ток (Амперы)
+  voltage_v?: number; // Напряжение (Вольты)
+  power_kw?: number;  // Мощность (Киловатты)
+  price_per_kwh?: number; // Текущий тариф
 }

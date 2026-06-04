@@ -1,95 +1,114 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuthStore } from '../store/useAuthStore';
-import { Zap, Lock, User, AlertCircle } from 'lucide-react';
+import { ShieldCheck, Lock, User, Zap } from 'lucide-react';
 
 const Login: React.FC = () => {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [isLoading, setIsLoading] = useState(false);
-  
   const login = useAuthStore((state) => state.login);
   const navigate = useNavigate();
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setError('');
     setIsLoading(true);
+    setError('');
+    
+    // Имитация задержки сети для солидности
+    await new Promise(r => setTimeout(r, 800));
 
-    // Имитация задержки сети
-    setTimeout(() => {
-      const success = login(username, password);
-      if (success) {
-        navigate('/');
-      } else {
-        setError('Неверный логин или пароль');
-        setIsLoading(false);
-      }
-    }, 500);
+    if (login(username, password)) {
+      navigate('/');
+    } else {
+      setError('Неверный логин или пароль');
+      setIsLoading(false);
+    }
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-app-bg transition-colors p-4">
-      <div className="w-full max-w-md space-y-8">
-        <div className="text-center space-y-2">
-          <div className="inline-flex p-4 bg-white dark:bg-app-card rounded-3xl shadow-xl shadow-blue-500/10 border border-gray-100 dark:border-app-border mb-4 transition-all hover:scale-105">
-            <Zap className="w-10 h-10 text-blue-500 fill-blue-500/10" />
+    <div className="min-h-screen bg-slate-50 dark:bg-[#0f172a] flex items-center justify-center p-6 transition-colors duration-500 relative overflow-hidden">
+      {/* Декоративные элементы фона */}
+      <div className="absolute top-[-10%] left-[-10%] w-[40%] h-[40%] bg-blue-500/10 dark:bg-blue-600/10 blur-[120px] rounded-full animate-pulse"></div>
+      <div className="absolute bottom-[-10%] right-[-10%] w-[40%] h-[40%] bg-emerald-500/10 dark:bg-emerald-600/10 blur-[120px] rounded-full"></div>
+
+      <div className="max-w-md w-full relative z-10">
+        {/* Логотип */}
+        <div className="flex flex-col items-center mb-10 animate-in fade-in slide-in-from-top-4 duration-700">
+          <div className="p-5 bg-blue-600 rounded-[1.5rem] shadow-2xl shadow-blue-500/40 mb-6 text-white transform hover:rotate-12 transition-transform duration-500">
+            <Zap className="w-10 h-10 fill-current" />
           </div>
-          <h1 className="text-3xl font-black text-gray-900 dark:text-white tracking-tight">AMPERE NEW</h1>
-          <p className="text-gray-400 dark:text-gray-500 font-medium">Система управления зарядными станциями</p>
+          <h1 className="text-4xl font-black text-slate-900 dark:text-white tracking-tighter uppercase leading-none">AMPERE</h1>
+          <p className="text-[10px] font-black text-blue-600 dark:text-blue-500 uppercase tracking-[0.4em] mt-3">Smart Charging Station</p>
         </div>
 
-        <div className="bg-white dark:bg-app-card p-8 rounded-[2.5rem] shadow-2xl shadow-gray-200/50 dark:shadow-none border border-gray-100 dark:border-app-border">
+        {/* Форма */}
+        <div className="bg-white dark:bg-[#1a1f2e] border border-slate-200 dark:border-white/10 rounded-[3rem] p-10 shadow-sm dark:shadow-2xl animate-in fade-in zoom-in-95 duration-500">
+          <h2 className="text-xl font-black text-slate-900 dark:text-white mb-8 uppercase tracking-widest text-center">Авторизация</h2>
+          
           <form onSubmit={handleSubmit} className="space-y-6">
-            {error && (
-              <div className="flex items-center gap-2 p-4 bg-red-50 dark:bg-red-500/10 text-red-500 rounded-2xl text-sm font-bold animate-in fade-in zoom-in-95">
-                <AlertCircle className="w-4 h-4" />
-                {error}
-              </div>
-            )}
-
-            <div className="space-y-4">
-              <div className="relative group">
-                <User className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400 group-focus-within:text-blue-500 transition-colors" />
-                <input
-                  type="text"
-                  placeholder="Логин"
+            <div className="space-y-1">
+              <label className="text-[10px] font-black text-slate-400 dark:text-app-muted uppercase ml-4 tracking-widest">Логин</label>
+              <div className="relative">
+                <div className="absolute left-5 top-5 text-slate-400 dark:text-gray-500">
+                  <User className="w-5 h-5" />
+                </div>
+                <input 
+                  type="text" 
+                  required
+                  placeholder="admin"
+                  className="w-full bg-slate-50 dark:bg-black/20 border border-slate-200 dark:border-white/5 p-5 pl-14 rounded-2xl outline-none focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500 dark:text-white font-bold transition-all placeholder:text-slate-300 dark:placeholder:text-gray-700"
                   value={username}
                   onChange={(e) => setUsername(e.target.value)}
-                  className="w-full pl-12 pr-4 py-4 bg-gray-50 dark:bg-app-bg border border-gray-200 dark:border-app-border rounded-2xl text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 outline-none transition-all placeholder:text-gray-400"
-                  required
-                />
-              </div>
-
-              <div className="relative group">
-                <Lock className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400 group-focus-within:text-blue-500 transition-colors" />
-                <input
-                  type="password"
-                  placeholder="Пароль"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  className="w-full pl-12 pr-4 py-4 bg-gray-50 dark:bg-app-bg border border-gray-200 dark:border-app-border rounded-2xl text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 outline-none transition-all placeholder:text-gray-400"
-                  required
                 />
               </div>
             </div>
 
-            <button
-              type="submit"
+            <div className="space-y-1">
+              <label className="text-[10px] font-black text-slate-400 dark:text-app-muted uppercase ml-4 tracking-widest">Пароль</label>
+              <div className="relative">
+                <div className="absolute left-5 top-5 text-slate-400 dark:text-gray-500">
+                  <Lock className="w-5 h-5" />
+                </div>
+                <input 
+                  type="password" 
+                  required
+                  placeholder="••••••••"
+                  className="w-full bg-slate-50 dark:bg-black/20 border border-slate-200 dark:border-white/5 p-5 pl-14 rounded-2xl outline-none focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500 dark:text-white font-bold transition-all placeholder:text-slate-300 dark:placeholder:text-gray-700"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                />
+              </div>
+            </div>
+
+            {error && (
+              <div className="bg-red-500/10 border border-red-500/20 text-red-500 p-4 rounded-xl text-xs font-bold uppercase tracking-widest text-center animate-shake">
+                {error}
+              </div>
+            )}
+
+            <button 
+              type="submit" 
               disabled={isLoading}
-              className="w-full py-4 bg-gray-900 dark:bg-blue-600 hover:bg-black dark:hover:bg-blue-700 text-white rounded-2xl font-black text-lg shadow-xl shadow-gray-200 dark:shadow-blue-500/20 transition-all active:scale-[0.98] disabled:opacity-70"
+              className="w-full py-5 bg-blue-600 hover:bg-blue-700 text-white rounded-[1.5rem] font-black uppercase text-xs shadow-2xl shadow-blue-500/30 active:scale-95 transition-all disabled:opacity-50 flex items-center justify-center gap-3 group"
             >
-              {isLoading ? 'ВХОД...' : 'ВОЙТИ'}
+              {isLoading ? (
+                <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
+              ) : (
+                <>
+                  Войти в систему
+                  <ShieldCheck className="w-5 h-5 group-hover:scale-110 transition-transform" />
+                </>
+              )}
             </button>
           </form>
         </div>
 
-        <div className="text-center">
-          <p className="text-[10px] text-gray-300 dark:text-gray-600 font-bold uppercase tracking-[0.2em]">
-            Тестовый доступ: admin2026 / kasa2026 / buhgalter2026
-          </p>
-        </div>
+        {/* Подвал */}
+        <p className="text-center mt-10 text-[10px] font-black text-slate-400 dark:text-gray-600 uppercase tracking-[0.3em]">
+          &copy; 2026 AMPERE ENERGY SYSTEMS
+        </p>
       </div>
     </div>
   );

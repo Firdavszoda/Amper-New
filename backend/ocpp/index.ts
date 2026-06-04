@@ -3,12 +3,9 @@ import { Server as HttpServer } from 'http';
 import { Server as SocketIOServer } from 'socket.io';
 import { getDB } from '../database/db'; 
 
-// Хранилище для динамического вычисления шага: transactionId -> { lastWh: number }
 export const chargingSpeeds = new Map<number, { lastWh: number }>();
-
 export const activeConnections = new Map<string, WebSocket>();
-
-export let globalPricePerKwh = 3.6; // Дефолтная цена (TJS за 1 кВтч)
+export let globalPricePerKwh = 3.6;
 
 export const loadGlobalPrice = async () => {
   try {
@@ -20,9 +17,7 @@ export const loadGlobalPrice = async () => {
       await db.run(`INSERT OR IGNORE INTO settings (key, value) VALUES ('price_per_kwh', '3.6')`);
     }
     console.log(`💰 Текущий тариф загружен: ${globalPricePerKwh} TJS/kWh`);
-  } catch (e) {
-    console.error('Ошибка загрузки тарифа', e);
-  }
+  } catch (e) { console.error('Ошибка загрузки тарифа', e); }
 };
 
 export function setupOcppServer(server: HttpServer, io: SocketIOServer) {
@@ -38,12 +33,19 @@ export function setupOcppServer(server: HttpServer, io: SocketIOServer) {
 
   console.log('⚡ OCPP Сервер инициализирован. Ждем подключения станций...');
 
-  wss.on('connection', (ws: WebSocket, req) => {
+  wss.on('connection', async (ws: WebSocket, req) => {
     const urlParts = req.url?.split('/') || [];
     const stationId = urlParts[urlParts.length - 1];
 
     console.log(`🔌 Станция подключена: [${stationId}]`);
     activeConnections.set(stationId, ws);
+
+    try {
+      const db = await getDB();
+      await db.run('UPDATE stations SET status = "online" WHERE serial_number = ?', [stationId]);
+      await db.run(`UPDATE connectors SET status = "available" WHERE station_id = (SELECT id FROM stations WHERE serial_number = ?)`, [stationId]);
+      io.emit('station_status_update');
+    } catch (e) { console.error('Ошибка ONLINE:', e); }
 
     ws.on('message', async (message: string) => {
       try {
@@ -51,7 +53,6 @@ export function setupOcppServer(server: HttpServer, io: SocketIOServer) {
         
         if (Array.isArray(parsed) && parsed[0] === 2) {
           const [messageTypeId, messageId, action, payload] = parsed;
-          
           console.log(`📥 Получено от [${stationId}]: ${action}`);
 
           if (action === 'BootNotification') {
@@ -71,170 +72,146 @@ export function setupOcppServer(server: HttpServer, io: SocketIOServer) {
               const station = await db.get('SELECT id FROM stations WHERE serial_number = ?', [stationId]);
               if (station) {
                 let appStatus = 'available';
-                
-                if (status === 'Charging') {
-                  appStatus = 'charging';
-                } else if (status === 'Preparing' || status === 'SuspendedEV' || status === 'SuspendedEVSE') {
-                  appStatus = 'available'; 
-                } else if (status === 'Faulted') {
-                  appStatus = 'faulted';
-                } else if (status === 'Occupied') {
-                  appStatus = 'charging'; 
-                }
+                if (status === 'Charging' || status === 'Occupied') appStatus = 'charging';
+                else if (status === 'Faulted') appStatus = 'faulted';
+                else if (status === 'Preparing' || status === 'SuspendedEV' || status === 'SuspendedEVSE') appStatus = 'available';
 
-                await db.run('UPDATE connectors SET status = ? WHERE station_id = ? AND name LIKE ?', 
-                  [appStatus, station.id, `%${connectorId}%`]);
-                
+                await db.run('UPDATE connectors SET status = ? WHERE station_id = ? AND name LIKE ?', [appStatus, station.id, `%${connectorId}%`]);
                 io.emit('station_status_update');
               }
             } catch (e) { console.error('Ошибка БД в StatusNotification:', e); }
           }
 
-          if (action === 'StopTransaction') {
-            ws.send(JSON.stringify([3, messageId, { idTagInfo: { status: "Accepted" } }]));
-            console.log(`✅ Эмулятор подтвердил остановку транзакции ${payload.transactionId}`);
-            chargingSpeeds.delete(payload.transactionId);
-            
-            try {
-              const db = await getDB();
-              await db.run('UPDATE connectors SET status = "available" WHERE id IN (SELECT connector_id FROM transactions WHERE id = ?)', [payload.transactionId]);
-              io.emit('station_status_update');
-            } catch (e) { console.error('Ошибка сброса статуса:', e); }
-          }
-
           if (action === 'StartTransaction') {
             try {
               const db = await getDB();
+              const { connectorId, idTag } = payload;
+              
+              // Переводим физический connectorId (1 или 2) в ID базы данных
               const station = await db.get('SELECT id FROM stations WHERE serial_number = ?', [stationId]);
-              let correctTransactionId = payload.transactionId;
+              const dbConn = await db.get('SELECT id FROM connectors WHERE station_id = ? AND name LIKE ?', [station.id, `%${connectorId}%`]);
+              const realDbConnectorId = dbConn?.id || connectorId;
 
-              if (!correctTransactionId && station) {
-                const tx = await db.get(`
-                  SELECT t.id 
-                  FROM transactions t
-                  JOIN connectors c ON t.connector_id = c.id
-                  WHERE c.station_id = ? AND c.name LIKE ? AND t.status = 'charging'
-                  ORDER BY t.id DESC LIMIT 1
-                `, [station.id, `%${payload.connectorId}%`]);
+              let tx = await db.get('SELECT id FROM transactions WHERE connector_id = ? AND status = "charging"', [realDbConnectorId]);
+
+              if (!tx) {
+                console.log(`⚡ Запуск напрямую со станции (ID Tag: ${idTag || 'Unknown'})`);
+                const result = await db.run(
+                  `INSERT INTO transactions (connector_id, start_time, status, is_full_tank, target_kwh, amount_tjs, consumed_kwh) 
+                   VALUES (?, CURRENT_TIMESTAMP, 'charging', 1, 999, 0, 0)`,
+                  [realDbConnectorId]
+                );
+                tx = { id: result.lastID };
+                await db.run('UPDATE connectors SET status = "charging" WHERE id = ?', [realDbConnectorId]);
                 
-                if (tx) {
-                  correctTransactionId = tx.id;
-                } else {
-                  correctTransactionId = Math.floor(Math.random() * 100000); 
-                }
+                io.emit('charging_update', {
+                  transaction_id: tx.id, connector_id: realDbConnectorId, consumed_kwh: 0, amount_tjs: 0, status: 'charging', soc: 0, price_per_kwh: globalPricePerKwh
+                });
+                io.emit('station_status_update');
               }
-
-              const startMeter = Number(payload.meterStart) || 0;
-              await db.run('UPDATE transactions SET meter_start = ? WHERE id = ?', [startMeter, correctTransactionId]);
-
-              ws.send(JSON.stringify([3, messageId, { 
-                idTagInfo: { status: "Accepted" }, 
-                transactionId: correctTransactionId 
-              }]));
-              console.log(`✅ StartTransaction подтвержден: ID ${correctTransactionId} для коннектора ${payload.connectorId}`);
-            } catch (e) {
-              console.error('Ошибка в StartTransaction:', e);
-            }
+              ws.send(JSON.stringify([3, messageId, { transactionId: tx.id, idTagInfo: { status: "Accepted" } }]));
+            } catch (e) { console.error('Ошибка StartTransaction:', e); }
           }
 
           if (action === 'MeterValues') {
-            const { connectorId, transactionId, meterValue } = payload;
-            
-            let currentMeterWh = 0;
-            const sampledValues = meterValue[0]?.sampledValue || [];
-            for (const sv of sampledValues) {
-              if (!sv.measurand || sv.measurand === 'Energy.Active.Import.Register') {
-                currentMeterWh = Number(sv.value) || 0;
-                break;
-              }
-            }
-
-            ws.send(JSON.stringify([3, messageId, {}])); 
-
+            ws.send(JSON.stringify([3, messageId, {}]));
             try {
               const db = await getDB();
-              const tx = await db.get('SELECT id, status, target_kwh, meter_start FROM transactions WHERE id = ?', [transactionId]);
+              const tx = await db.get('SELECT * FROM transactions WHERE id = ?', [payload.transactionId]);
               
-              if (!tx || tx.status === 'completed') {
-                console.log(`🧟 Зомби-сессия обнаружена! Принудительная остановка транзакции ${transactionId}`);
-                remoteStop(stationId, transactionId, connectorId);
-                return;
+              if (tx && tx.status === 'charging') {
+                let realKwh = tx.consumed_kwh;
+                let currentSoc = 0;
+
+                const meterValues = payload.meterValue || [];
+                for (const mv of meterValues) {
+                  const sampled = mv.sampledValue || [];
+                  for (const sv of sampled) {
+                    if (!sv.measurand || sv.measurand === 'Energy.Active.Import.Register') {
+                      realKwh = (Number(sv.value) || 0) / 1000; 
+                    }
+                    if (sv.measurand === 'SoC') currentSoc = Number(sv.value) || 0;
+                  }
+                }
+
+                const newAmount = realKwh * globalPricePerKwh;
+
+                if (tx.is_full_tank === 0 && realKwh >= tx.target_kwh) {
+                  console.log(`🛑 АВТОСТОП: Лимит достигнут для транзакции ${tx.id}`);
+                  const msgId = Math.random().toString(36).substring(2, 10);
+                  ws.send(JSON.stringify([2, msgId, "RemoteStopTransaction", { transactionId: tx.id }]));
+
+                  await db.run('UPDATE transactions SET status = "completed", stop_time = CURRENT_TIMESTAMP WHERE id = ?', [tx.id]);
+                  await db.run('UPDATE connectors SET status = "available" WHERE id = ?', [tx.connector_id]);
+                  
+                  io.emit('transaction_completed', { transactionId: tx.id, connectorId: tx.connector_id, final_kwh: realKwh, final_tjs: newAmount });
+                  io.emit('station_status_update');
+                } else {
+                  await db.run('UPDATE transactions SET consumed_kwh = ?, amount_tjs = ? WHERE id = ?', [realKwh, newAmount, tx.id]);
+                  io.emit('charging_update', { transaction_id: tx.id, connector_id: tx.connector_id, consumed_kwh: realKwh, amount_tjs: newAmount, status: 'charging', soc: currentSoc, price_per_kwh: globalPricePerKwh });
+                }
               }
+            } catch (e) { console.error('Ошибка MeterValues:', e); }
+          }
 
-              let startMeterWh = Number(tx.meter_start) || 0;
+          if (action === 'StopTransaction') {
+            ws.send(JSON.stringify([3, messageId, { idTagInfo: { status: "Accepted" } }]));
+            try {
+              const db = await getDB();
+              const tx = await db.get('SELECT consumed_kwh, amount_tjs, connector_id FROM transactions WHERE id = ?', [payload.transactionId]);
+              if (tx) {
+                await db.run('UPDATE transactions SET status = "completed", stop_time = CURRENT_TIMESTAMP WHERE id = ?', [payload.transactionId]);
+                await db.run('UPDATE connectors SET status = "available" WHERE id = ?', [tx.connector_id]);
 
-              if (startMeterWh === 0 && currentMeterWh > 0) {
-                startMeterWh = currentMeterWh;
-                console.log(`🔧 [Коннектор ${connectorId}] Самоисцеление счетчика: установлен meter_start = ${startMeterWh} для транзакции ${transactionId}`);
-                await db.run('UPDATE transactions SET meter_start = ? WHERE id = ?', [startMeterWh, transactionId]);
+                io.emit('transaction_completed', { transactionId: payload.transactionId, connectorId: tx.connector_id, final_kwh: tx.consumed_kwh || 0, final_tjs: tx.amount_tjs || 0 });
+                io.emit('station_status_update');
               }
-
-              let sessionEnergyWh = currentMeterWh - startMeterWh;
-              if (sessionEnergyWh < 0) sessionEnergyWh = 0; 
-              
-              const consumedKwh = sessionEnergyWh / 1000;
-              const amountTjs = consumedKwh * globalPricePerKwh; 
-
-              io.emit('charging_update', { 
-                transaction_id: transactionId, 
-                connector_id: connectorId, 
-                consumed_kwh: consumedKwh, 
-                amount_tjs: amountTjs, 
-                status: 'charging' 
-              });
-
-              await db.run('UPDATE transactions SET consumed_kwh = ?, amount_tjs = ? WHERE id = ?', [consumedKwh, amountTjs, transactionId]);
-
-              const prevData = chargingSpeeds.get(transactionId) || { lastWh: currentMeterWh };
-
-              let currentStepWh = currentMeterWh - prevData.lastWh;
-              if (currentStepWh < 0) currentStepWh = 0;
-
-              chargingSpeeds.set(transactionId, { lastWh: currentMeterWh });
-
-              // ДИНАМИЧЕСКИЙ УМНЫЙ СТОП:
-              // Берём текущий шаг потребления и добавляем 20% запаса (множитель 1.2)
-              // Это позволяет остановить зарядку чуть раньше, учитывая инерцию станции.
-              const dynamicBufferWh = currentStepWh > 0 ? (currentStepWh * 1.2) : 100;
-
-              const projectedEnergyWh = sessionEnergyWh + dynamicBufferWh;
-              const projectedKwh = projectedEnergyWh / 1000;
-
-              if (tx.target_kwh && tx.target_kwh < 999 && projectedKwh >= tx.target_kwh) {
-                console.log(`🎯 ДИНАМИЧЕСКИЙ СТОП! Шаг: ${(currentStepWh/1000).toFixed(3)} кВт. Буфер: ${(dynamicBufferWh/1000).toFixed(3)} кВт. Факт: ${consumedKwh.toFixed(3)} кВтч. Ожидание: ${projectedKwh.toFixed(3)} >= Лимит: ${tx.target_kwh.toFixed(3)} кВтч.`);
-                remoteStop(stationId, transactionId, connectorId);
-              }
-
-            } catch (e) { console.error('Ошибка обработки MeterValues:', e); }
+            } catch (e) { console.error('Ошибка StopTransaction:', e); }
           }
         }
-      } catch (error) {
-        console.error(` Ошибка:`, error);
-      }
+      } catch (error) { console.error(` Ошибка:`, error); }
     });
 
-    ws.on('close', () => {
+    const setOffline = async () => {
       activeConnections.delete(stationId);
-    });
+      try {
+        const db = await getDB();
+        await db.run('UPDATE stations SET status = "offline" WHERE serial_number = ?', [stationId]);
+        await db.run(`UPDATE connectors SET status = "faulted" WHERE station_id = (SELECT id FROM stations WHERE serial_number = ?)`, [stationId]);
+        io.emit('station_status_update');
+      } catch (e) { console.error('Ошибка OFFLINE:', e); }
+    };
+
+    ws.on('close', setOffline);
+    ws.on('error', setOffline);
   });
 }
 
-export function remoteStart(stationId: string, connectorId: number, idTag: string = "KASSA", transactionId?: number) {
+// Отправка команды старта. Переводим DB_ID в физический (1 или 2) для симулятора
+export async function remoteStart(stationId: string, dbConnectorId: number, idTag: string = "KASSA", transactionId?: number) {
   const ws = activeConnections.get(stationId);
   if (!ws) return false;
+  
+  const db = await getDB();
+  const conn = await db.get('SELECT name FROM connectors WHERE id = ?', [dbConnectorId]);
+  let physicalId = 1;
+  if (conn) {
+    const match = conn.name.match(/\d+/);
+    if (match) physicalId = parseInt(match[0], 10);
+  }
+
   const messageId = Math.random().toString(36).substring(2, 9);
-  const payload: any = { connectorId, idTag };
+  const payload: any = { connectorId: physicalId, idTag };
   if (transactionId) payload.transactionId = transactionId;
   ws.send(JSON.stringify([2, messageId, "RemoteStartTransaction", payload]));
   return true;
 }
 
-export function remoteStop(stationId: string, transactionId: number, connectorId: number) {
+export function remoteStop(stationId: string, transactionId: number) {
   const ws = activeConnections.get(stationId);
   if (!ws) return false;
-
   const messageId = Math.random().toString(36).substring(2, 9);
-  ws.send(JSON.stringify([2, messageId, "RemoteStopTransaction", { transactionId, connectorId }]));
-  console.log(`🛑 Отправлен RemoteStop: ${stationId}, tx: ${transactionId}, conn: ${connectorId}`);
+  // RemoteStopTransaction по стандарту OCPP берет только transactionId
+  ws.send(JSON.stringify([2, messageId, "RemoteStopTransaction", { transactionId }]));
   return true;
 }

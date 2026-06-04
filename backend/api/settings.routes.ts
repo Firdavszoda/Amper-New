@@ -33,6 +33,9 @@ router.post('/price', async (req, res) => {
       [price.toString(), price.toString()]
     );
     await loadGlobalPrice();
+    if (req.io) {
+      req.io.emit('price_updated', { price_per_kwh: globalPricePerKwh });
+    }
     res.json({ success: true, new_price: globalPricePerKwh });
   } catch (error) {
     console.error('Ошибка сохранения тарифа:', error);

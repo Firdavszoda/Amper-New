@@ -61,24 +61,18 @@ export async function initDB() {
     -- 5. ОБНОВЛЕННАЯ: Таблица транзакций (привязана к Смене и Ручке)
     CREATE TABLE IF NOT EXISTS transactions (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
-      shift_id INTEGER NOT NULL,
-      connector_id INTEGER NOT NULL,
-      
-      amount_tjs REAL NOT NULL,       -- Оплачено клиентом (в сомони)
-      target_kwh REAL NOT NULL,       -- Лимит кВт/ч
-      consumed_kwh REAL DEFAULT 0,    -- Сколько реально залито
-      is_full_tank BOOLEAN DEFAULT 0, -- 1 если заряжаем до полного (без лимита)
-      
-      meter_start INTEGER DEFAULT 0,  -- НОВАЯ КОЛОНКА: Начальные показания счетчика станции
-      
-      ocpp_transaction_id INTEGER,    -- Уникальный ID от самой железной станции
-      status TEXT CHECK(status IN ('pending', 'charging', 'completed', 'stopped_by_user', 'error')) DEFAULT 'pending',
-      
-      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      shift_id INTEGER,
+      connector_id INTEGER,
+      amount_tjs REAL,
+      target_kwh REAL,
+      consumed_kwh REAL DEFAULT 0,
+      status TEXT DEFAULT 'charging',
+      start_time DATETIME DEFAULT CURRENT_TIMESTAMP,
+      stop_time DATETIME,
       finished_at DATETIME,
-      
-      FOREIGN KEY (shift_id) REFERENCES shifts(id),
-      FOREIGN KEY (connector_id) REFERENCES connectors(id)
+      meter_start REAL DEFAULT 0,
+      is_full_tank INTEGER DEFAULT 0,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );
 
     -- 6. Таблица логов безопасности для отслеживания махинаций
@@ -97,17 +91,6 @@ export async function initDB() {
       value TEXT
     );
   `);
-
-  try {
-    // Безопасное добавление колонки в существующую таблицу
-    await dbInstance.exec('ALTER TABLE transactions ADD COLUMN meter_start INTEGER DEFAULT 0;');
-    console.log('⚡ Колонка meter_start добавлена в transactions.');
-  } catch (e: any) {
-    // Игнорируем ошибку, если колонка уже существует (ошибка 'duplicate column name' или аналогичная)
-    if (!e.message.includes('duplicate column')) {
-      console.log('Информация: колонка meter_start уже существует или произошла некритичная ошибка.');
-    }
-  }
 
   // Установка настроек по умолчанию
   await dbInstance.run(`INSERT OR IGNORE INTO settings (key, value) VALUES ('smart_stop_reserve_sec', '20')`);

@@ -1,8 +1,10 @@
-import React, { useState, useEffect } from 'react';
-import { BatteryFull, Play, X } from 'lucide-react';
+import React, { useState, useEffect, useRef } from 'react';
+import { Square, Zap, X, BatteryFull } from 'lucide-react';
 import type { Station, ActiveTransaction } from '../types';
 import StatusBadge from './ui/StatusBadge';
 import { cn } from '../lib/utils';
+import { socket } from '../lib/socket';
+import { useStore } from '../store/useStore';
 
 interface StationCardProps {
   station: Station;
@@ -16,76 +18,118 @@ const StationCard: React.FC<StationCardProps> = ({ station, activeTransactions, 
 
   return (
     <div className={cn(
-      "bg-[#121621] border border-white/5 rounded-3xl p-6 shadow-2xl transition-all duration-300",
-      isOffline && "opacity-60"
+      "bg-rose-50/50 dark:bg-[#1a1c23] border border-rose-100 dark:border-white/5 rounded-[2rem] p-6 shadow-sm transition-all duration-300",
+      isOffline && "opacity-75 grayscale-[0.2]"
     )}>
-      {/* HEADER */}
-      <div className="flex justify-between items-start mb-8">
+      <div className="flex justify-between items-start mb-6">
         <div>
-          <h3 className="text-xl font-black text-white uppercase tracking-tight">{station.name}</h3>
-          <p className="text-[10px] font-mono text-gray-500 uppercase tracking-widest mt-1">SN: {station.serial_number}</p>
+          <h2 className="text-2xl font-black text-indigo-700 dark:text-indigo-400 uppercase tracking-tight">{station.name}</h2>
+          <p className="text-xs font-mono text-slate-500 dark:text-gray-500 mt-1">{station.serial_number}</p>
         </div>
-        <StatusBadge status={station.status} />
+        <div className="flex gap-2">
+           <button className="w-8 h-8 rounded-full bg-black/5 flex items-center justify-center text-slate-400 hover:text-slate-600 transition-colors">⟳</button>
+        </div>
       </div>
 
-      {/* GRID */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+      <div className="flex items-center gap-4 mb-6 relative">
+        <div className="h-[1px] flex-1 bg-gradient-to-r from-transparent via-slate-200 dark:via-white/10 to-transparent"></div>
+        <span className="text-xs font-bold uppercase tracking-widest text-slate-500">Статус зарядника</span>
+        <div className="h-[1px] flex-1 bg-gradient-to-r from-transparent via-slate-200 dark:via-white/10 to-transparent"></div>
+      </div>
+
+      <div className="bg-white dark:bg-black/20 rounded-2xl p-4 flex justify-between items-center mb-8 border border-slate-100 dark:border-white/5">
+         <div>
+           <div className="text-sm text-slate-900 dark:text-white"><span className="text-slate-500">Мощность:</span> <span className="font-black font-mono">160 kW</span></div>
+           <div className="text-xs text-slate-500 mt-1">Время в сети: <span className="font-mono">{new Date().toLocaleDateString()}</span></div>
+         </div>
+         <StatusBadge status={station.status} />
+      </div>
+
+      <div className="flex items-center gap-4 mb-6 relative">
+        <div className="h-[1px] flex-1 bg-gradient-to-r from-transparent via-slate-200 dark:via-white/10 to-transparent"></div>
+        <span className="text-xs font-bold uppercase tracking-widest text-slate-500">Статус коннектора</span>
+        <div className="h-[1px] flex-1 bg-gradient-to-r from-transparent via-slate-200 dark:via-white/10 to-transparent"></div>
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         {station.connectors?.map((conn) => (
-          <ConnectorPanel 
-            key={conn.id} 
-            connector={conn} 
-            activeTx={activeTransactions.find(t => t.connector_id === conn.id)}
-            onStart={onStartCharging}
-            onStop={onStopCharging}
-          />
+          <ConnectorPanel key={conn.id} connector={conn} activeTx={activeTransactions.find(t => t.connector_id === conn.id)} onStart={onStartCharging} onStop={onStopCharging} isStationOffline={isOffline} />
         ))}
       </div>
     </div>
   );
 };
 
-/* --- CONNECTOR PANEL --- */
+/* --- CONNECTOR PANEL (STATE MACHINE) --- */
 
-const ConnectorPanel: React.FC<any> = ({ connector, activeTx, onStart, onStop }) => {
+type UIState = 'idle' | 'starting' | 'charging' | 'finished';
+
+const ConnectorPanel: React.FC<any> = ({ connector, activeTx, onStart, onStop, isStationOffline }) => {
+  const { pricePerKwh } = useStore();
+  const [uiState, setUiState] = useState<UIState>('idle');
   const [amount, setAmount] = useState<string>('');
-  const [isFullTankModalOpen, setIsFullTankModalOpen] = useState(false);
-  const [pendingFullTankData, setPendingFullTankData] = useState<{ connectorId: number } | null>(null);
-  const [summaryModalData, setSummaryModalData] = useState<{tjs: number, kwh: number} | null>(null);
-  const [prevTx, setPrevTx] = useState<any>(null);
+  const [receipt, setReceipt] = useState<any>(null);
+  const [liveTime, setLiveTime] = useState<string>('00:00:00');
+  const timerRef = useRef<any>(null);
 
+  // 1. Старт зарядки
   useEffect(() => {
-    if (activeTx) {
-      // Транзакция активна - запоминаем актуальные данные
-      setPrevTx(activeTx);
-    } else if (!activeTx && prevTx) {
-      // Транзакция исчезла (Авто-стоп сервера). Вызываем чек!
-      setSummaryModalData({
-        tjs: prevTx.amount_tjs || 0,
-        kwh: prevTx.consumed_kwh || 0
-      });
-      setPrevTx(null); // Очищаем память
-      if (typeof setAmount === 'function') setAmount('');
+    if (activeTx && uiState !== 'charging' && uiState !== 'finished') {
+      setUiState('charging');
+      setReceipt(null);
     }
-  }, [activeTx]);
+  }, [activeTx, uiState]);
 
-  const isCharging = connector.status === 'charging' && activeTx;
+  // 2. Ловим итоговый чек по сокету (ЖЕЛЕЗОБЕТОННО)
+  useEffect(() => {
+    const handleCompleted = (data: any) => {
+      if (connector.id === data.connectorId) {
+        setReceipt({ kwh: data.final_kwh, tjs: data.final_tjs });
+        setUiState('finished');
+      }
+    };
+    socket.on('transaction_completed', handleCompleted);
+    return () => { socket.off('transaction_completed', handleCompleted); };
+  }, [connector.id]);
 
-  const openFullTankModal = (connectorId: number) => {
-    setPendingFullTankData({ connectorId });
-    setIsFullTankModalOpen(true);
-  };
+  // 3. Сброс, если транзакция зависла (защита от багов)
+  useEffect(() => {
+    let timeout: any;
+    if (!activeTx && uiState === 'charging') {
+      timeout = setTimeout(() => {
+        setUiState(prev => prev === 'charging' ? 'idle' : prev);
+      }, 4000);
+    }
+    return () => clearTimeout(timeout);
+  }, [activeTx, uiState]);
 
-  const handleStartClick = (connectorId: number, amt: number, isFullTank: boolean) => {
-    onStart(connectorId, amt, isFullTank);
+  // 4. Живой таймер
+  useEffect(() => {
+    if (uiState === 'charging' && activeTx?.start_time) {
+      const start = new Date(activeTx.start_time).getTime();
+      timerRef.current = setInterval(() => {
+        const now = new Date().getTime();
+        const diff = Math.max(0, now - start);
+        const h = Math.floor(diff / 3600000).toString().padStart(2, '0');
+        const m = Math.floor((diff % 3600000) / 60000).toString().padStart(2, '0');
+        const s = Math.floor((diff % 60000) / 1000).toString().padStart(2, '0');
+        setLiveTime(`${h}:${m}:${s}`);
+      }, 1000);
+    } else {
+      clearInterval(timerRef.current);
+      if (liveTime !== '00:00:00') {
+        const timer = setTimeout(() => setLiveTime('00:00:00'), 0);
+        return () => clearTimeout(timer);
+      }
+    }
+    return () => clearInterval(timerRef.current);
+  }, [uiState, activeTx, liveTime]);
+
+  const handleStartClick = (isFull: boolean) => {
+    if (isStationOffline) return;
+    setUiState('starting');
+    onStart(connector.id, Number(amount) || 0, isFull);
     setAmount('');
-  };
-
-  const confirmFullTankCharge = () => {
-    if (pendingFullTankData) {
-      handleStartClick(pendingFullTankData.connectorId, 0, true);
-    }
-    setIsFullTankModalOpen(false);
-    setPendingFullTankData(null);
   };
 
   const handleStopClick = () => {
@@ -93,151 +137,161 @@ const ConnectorPanel: React.FC<any> = ({ connector, activeTx, onStart, onStop })
     onStop(activeTx.id, connector.id);
   };
 
+  const closeReceipt = () => {
+    setUiState('idle');
+    setReceipt(null);
+    setAmount('');
+  };
+
   return (
     <div className={cn(
-      "min-h-[280px] rounded-2xl p-5 border transition-all duration-300 flex flex-col justify-between",
-      isCharging 
-        ? "bg-blue-600/5 border-blue-500/20" 
-        : "bg-[#1e2536] border-white/5"
+      "relative flex flex-col w-full h-[360px] rounded-[1.75rem] p-5 border transition-all duration-300 overflow-hidden",
+      uiState === 'charging' 
+        ? "bg-indigo-50/90 dark:bg-indigo-950/10 border-indigo-200 dark:border-indigo-500/20 shadow-md" 
+        : "bg-white dark:bg-[#1f222b] border-slate-200 dark:border-white/5 shadow-sm"
     )}>
-      {/* Info Header */}
-      <div className="flex justify-between items-start mb-6">
-        <div>
-          <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">{connector.name}</p>
-          <p className="text-[10px] font-mono text-gray-500 uppercase">{connector.type.replace(/_/g, ' ')}</p>
+      
+      {/* ИНФОРМАЦИОННАЯ ШАПКА */}
+      <div className="flex flex-col items-center text-center w-full mb-3 shrink-0">
+        <div className="flex items-center gap-2">
+          {uiState === 'charging' && <span className="text-indigo-500 animate-pulse text-xs">⚡</span>}
+          <h4 className="text-sm font-black uppercase tracking-wider text-slate-900 dark:text-white">{connector.name}</h4>
         </div>
-        <div className="text-right">
-          <p className="text-[9px] text-gray-500 uppercase font-bold">Limit</p>
-          <p className="text-xs font-black text-gray-300 font-mono">{connector.max_power_kw} kW</p>
-        </div>
+        <p className="text-[9px] text-slate-400 font-mono tracking-widest mt-0.5">{connector.type.replace(/_/g, ' ')}</p>
       </div>
 
-      {isCharging ? (
-        <div className="flex flex-col gap-4 animate-in fade-in duration-500">
-          <div className="grid grid-cols-2 gap-3">
-            <div className="bg-black/20 p-3 rounded-xl border border-white/5">
-              <p className="text-[8px] text-gray-500 uppercase font-bold mb-1">Energy</p>
-              <p className="text-sm font-mono font-bold text-white">{activeTx.consumed_kwh.toFixed(2)}</p>
+      {/* СОСТОЯНИЕ 1: IDLE */}
+      {uiState === 'idle' && (
+        <div className="flex flex-col flex-1 animate-in fade-in h-full">
+          {receipt === 'full_tank_confirm' ? (
+            <div className="flex flex-col items-center justify-center h-full bg-blue-50 dark:bg-blue-900/20 rounded-2xl p-4 border border-blue-100 dark:border-blue-500/20">
+              <h4 className="text-blue-600 dark:text-blue-400 font-black uppercase text-xs mb-2 text-center">Полный бак</h4>
+              <p className="text-[10px] text-slate-500 text-center mb-4 leading-tight">Зарядка будет идти до 100% или до ручной остановки.</p>
+              <div className="flex gap-2 w-full">
+                <button onClick={() => setReceipt(null)} className="flex-1 py-2 bg-slate-200 dark:bg-white/10 rounded-xl text-[10px] font-bold text-slate-600 dark:text-white uppercase tracking-wider">Отмена</button>
+                <button onClick={() => { setReceipt(null); handleStartClick(true); }} className="flex-1 py-2 bg-blue-500 hover:bg-blue-600 text-white rounded-xl text-[10px] font-black uppercase tracking-widest shadow-sm">Начать</button>
+              </div>
             </div>
-            <div className="bg-black/20 p-3 rounded-xl border border-white/5">
-              <p className="text-[8px] text-gray-500 uppercase font-bold mb-1">Time</p>
-              <p className="text-sm font-mono font-bold text-white">05:00</p>
+          ) : (
+            <>
+              <div className="space-y-2.5 my-auto text-xs shrink-0">
+                 <div className="flex justify-between border-b border-slate-100 dark:border-white/5 pb-2">
+                   <span className="text-slate-400 font-medium">Статус:</span>
+                   <span className={cn("font-black uppercase tracking-widest text-[10px]", connector.status === 'available' ? "text-emerald-500" : "text-gray-400")}>
+                     {connector.status === 'available' ? 'Свободен' : 'Недоступен'}
+                   </span>
+                 </div>
+                 <div className="flex justify-between border-b border-slate-100 dark:border-white/5 pb-2">
+                   <span className="text-slate-400 font-medium">Мощность:</span>
+                   <span className="font-bold font-mono text-slate-800 dark:text-gray-300">{connector.max_power_kw} kW</span>
+                 </div>
+              </div>
+
+              <div className="mt-auto pt-3 shrink-0">
+                <input
+                  type="text" inputMode="decimal" value={amount}
+                  onChange={(e) => {
+                    let val = e.target.value.replace(',', '.').replace(/[^0-9.]/g, '');
+                    const parts = val.split('.');
+                    if (parts.length > 2) val = parts[0] + '.' + parts.slice(1).join('');
+                    setAmount(val);
+                  }}
+                  placeholder="Сумма (TJS)" disabled={connector.status !== 'available'}
+                  className="w-full bg-slate-50 dark:bg-black/20 border border-slate-200 dark:border-white/10 rounded-xl px-4 py-2.5 text-center text-lg font-black text-slate-900 dark:text-white focus:outline-none focus:border-indigo-500 tabular-nums disabled:opacity-50 transition-colors"
+                />
+                
+                <div className="flex gap-1.5 mt-2">
+                   {[10, 20, 50, 100].map(val => (
+                     <button 
+                       key={val} 
+                       onClick={() => setAmount(val.toString())} 
+                       className="flex-1 py-1.5 bg-slate-100 dark:bg-white/5 hover:bg-slate-200 dark:hover:bg-white/10 rounded-lg text-[10px] font-bold text-slate-600 dark:text-gray-300 transition-colors disabled:opacity-50"
+                     >
+                       {val}
+                     </button>
+                   ))}
+                </div>
+
+                <div className="flex gap-2 mt-2">
+                  <button onClick={() => handleStartClick(false)} disabled={!amount || connector.status !== 'available'} className="flex-1 bg-emerald-500 hover:bg-emerald-600 disabled:bg-slate-100 dark:disabled:bg-white/5 text-white disabled:text-slate-400 py-2.5 rounded-xl font-bold uppercase tracking-widest text-[10px] transition-all active:scale-95 shadow-sm">
+                    Запустить
+                  </button>
+                  <button onClick={() => setReceipt('full_tank_confirm')} disabled={connector.status !== 'available'} className="flex-1 bg-blue-500 hover:bg-blue-600 disabled:bg-slate-100 dark:disabled:bg-white/5 text-white disabled:text-slate-400 py-2.5 rounded-xl font-bold uppercase tracking-widest text-[10px] transition-all active:scale-95 shadow-sm">
+                    Полный бак
+                  </button>
+                </div>
+              </div>
+            </>
+          )}
+        </div>
+      )}
+
+      {/* СОСТОЯНИЕ 2: STARTING */}
+      {uiState === 'starting' && (
+        <div className="flex flex-col items-center justify-center h-full animate-in fade-in zoom-in duration-300 flex-1 bg-indigo-50/50 dark:bg-indigo-900/10 rounded-2xl border border-indigo-100 dark:border-indigo-500/20">
+          <Zap className="w-8 h-8 text-indigo-500 animate-bounce mb-3" />
+          <span className="text-[10px] font-black text-indigo-600 dark:text-indigo-400 uppercase tracking-widest animate-pulse">Запуск...</span>
+        </div>
+      )}
+
+      {/* СОСТОЯНИЕ 3: CHARGING */}
+      {uiState === 'charging' && activeTx && (
+        <div className="flex flex-col flex-1 animate-in fade-in h-full justify-between">
+          <div className="flex justify-center items-center relative h-24 my-auto shrink-0">
+            <div className="w-20 h-20 rounded-full border-4 border-indigo-100 dark:border-indigo-900/40 flex flex-col items-center justify-center shadow-inner bg-white dark:bg-black/10">
+              <div className="text-lg font-black text-indigo-600 dark:text-indigo-400 font-mono tabular-nums">{activeTx.soc || 0}%</div>
+              <div className="text-[7px] text-slate-400 font-black uppercase tracking-widest">SOC</div>
             </div>
-          </div>
-          
-          <div className="flex items-center justify-between bg-blue-600/10 p-3 rounded-xl border border-blue-500/20">
-            <div className="pl-2">
-              <p className="text-[8px] text-blue-300 uppercase font-bold mb-0.5">Total</p>
-              <p className="text-2xl font-mono font-black text-white leading-none">
-                {activeTx.amount_tjs.toFixed(2)} <span className="text-[10px] opacity-50 font-sans">TJS</span>
-              </p>
-            </div>
-            
-            <button 
-              onClick={handleStopClick} 
-              className="flex ml-[5px] items-center justify-center w-12 h-12 bg-red-500/10 hover:bg-red-500 text-red-500 hover:text-white rounded-xl border border-red-500/20 transition-all outline-none focus:outline-none focus:ring-0 active:scale-95 shadow-lg hover:shadow-red-500/30"
-            >
-              <X className="w-5 h-5 stroke-[3] " />
+            <button onClick={handleStopClick} className="absolute right-4 bottom-0 w-11 h-11 bg-white dark:bg-[#1a1c23] border border-slate-200 dark:border-white/10 rounded-full flex items-center justify-center text-slate-700 dark:text-white hover:text-red-500 dark:hover:text-red-400 transition-all shadow-md active:scale-90">
+              <Square className="w-4 h-4" fill="currentColor" />
             </button>
+          </div>
+
+          <div className="text-center text-[11px] font-bold text-slate-600 dark:text-slate-400 mb-2 shrink-0">
+            Время: <span className="font-mono tabular-nums text-sm text-slate-900 dark:text-white ml-1">{liveTime}</span>
+          </div>
+
+          <div className="grid grid-cols-3 border-t border-slate-200 dark:border-white/10 pt-3 mt-auto divide-x divide-slate-200 dark:divide-white/10 text-center bg-white/50 dark:bg-black/10 rounded-xl p-2 shrink-0 mb-1">
+            <div className="flex flex-col items-center justify-center">
+              <span className="text-[8px] text-slate-400 font-black uppercase tracking-wider mb-1">Энергия</span>
+              <div className="text-xs font-black text-emerald-500 font-mono tabular-nums">{(activeTx.consumed_kwh || 0).toFixed(2)} <span className="text-[7px] text-slate-400 font-normal">kWh</span></div>
+            </div>
+            <div className="flex flex-col items-center justify-center">
+              <span className="text-[8px] text-slate-400 font-black uppercase tracking-wider mb-1">Сумма</span>
+              <div className="text-xs font-black text-slate-900 dark:text-white font-mono tabular-nums">{(activeTx.amount_tjs || 0).toFixed(2)} <span className="text-[7px] text-slate-400 font-normal">TJS</span></div>
+            </div>
+            <div className="flex flex-col items-center justify-center">
+              <span className="text-[8px] text-slate-400 font-black uppercase tracking-wider mb-1">Тариф</span>
+              <div className="text-xs font-black text-indigo-500 font-mono tabular-nums">{(activeTx.price_per_kwh || pricePerKwh).toFixed(1)} <span className="text-[7px] text-slate-400 font-normal">TJS</span></div>
+            </div>
           </div>
         </div>
-      ) : (
-        <div className="flex flex-col gap-4">
-          <div className="relative">
-            <input 
-              type="number"
-              placeholder="0.00"
-              value={amount}
-              min="0"
-              step="any"
-              onKeyDown={(e) => {
-                if (e.key === '-' || e.key === 'e') {
-                  e.preventDefault();
-                }
-              }}
-              onChange={(e) => {
-                const val = e.target.value;
-                if (val === '' || Number(val) >= 0) {
-                  setAmount(val);
-                }
-              }}
-              className="w-full bg-[#121621] border border-white/5 rounded-xl px-4 py-4 text-white font-mono text-xl placeholder:text-gray-700 focus:outline-none focus:border-blue-500 transition-colors [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none [-moz-appearance:textfield]"
-            />
-            <span className="absolute right-4 top-5 text-gray-500 text-[10px] font-bold uppercase">TJS</span>
-          </div>
-          
-          <div className="grid grid-cols-2 gap-3">
-            <button 
-              onClick={() => handleStartClick(connector.id, Number(amount), false)}
-              disabled={!amount || Number(amount) <= 0}
-              className="h-14 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl flex items-center justify-center transition-all active:scale-95 shadow-lg shadow-emerald-900/20 outline-none focus:outline-none disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-emerald-600 disabled:active:scale-100"
-            >
-              <Play className="w-6 h-6 fill-white" />
-            </button>
-            <button 
-              onClick={() => openFullTankModal(connector.id)}
-              className="h-14 bg-white/5 hover:bg-white/10 text-white rounded-xl flex items-center justify-center transition-all outline-none focus:outline-none"
-            >
+      )}
+
+      {/* СОСТОЯНИЕ 4: FINISHED (ЧЕК) */}
+      {uiState === 'finished' && receipt && typeof receipt !== 'string' && (
+        <div className="flex flex-col flex-1 animate-in zoom-in-95 fade-in duration-300 h-full justify-between pb-1">
+          <div className="flex-1 flex flex-col items-center justify-center">
+            <div className="w-12 h-12 bg-emerald-100 dark:bg-emerald-500/20 text-emerald-500 rounded-full flex items-center justify-center mb-3 shrink-0">
               <BatteryFull className="w-6 h-6" />
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* Модальное окно подтверждения "До полного" */}
-      {isFullTankModalOpen && (
-        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-[100] flex items-center justify-center p-4">
-          <div className="bg-[#1a1f2e] border border-white/10 p-8 rounded-3xl max-w-sm w-full shadow-2xl text-center">
-            <h3 className="text-xl font-black text-white uppercase tracking-tight mb-2">Подтверждение</h3>
-            <p className="text-sm text-gray-400 mb-8">Запустить зарядку до полного бака без лимита суммы?</p>
-            <div className="flex gap-4">
-              <button 
-                onClick={() => setIsFullTankModalOpen(false)}
-                className="flex-1 py-4 bg-white/5 hover:bg-white/10 text-white rounded-xl font-bold uppercase text-xs transition-colors"
-              >
-                Отмена
-              </button>
-              <button 
-                onClick={confirmFullTankCharge}
-                className="flex-1 py-4 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl font-bold uppercase text-xs shadow-lg shadow-emerald-900/20 transition-all active:scale-95"
-              >
-                Да, начать
-              </button>
             </div>
-          </div>
-        </div>
-      )}
-
-      {/* Модальное окно "Итог зарядки" (Чек) */}
-      {summaryModalData && (
-        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-[110] flex items-center justify-center p-4">
-          <div className="bg-[#1a1f2e] border border-white/10 p-8 rounded-3xl max-w-sm w-full shadow-2xl text-center">
-            <div className="w-16 h-16 bg-emerald-500/20 rounded-full flex items-center justify-center mx-auto mb-4">
-              <svg className="w-8 h-8 text-emerald-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 13l4 4L19 7"></path>
-              </svg>
-            </div>
-            <h3 className="text-2xl font-black text-white uppercase tracking-tight mb-6">Зарядка завершена</h3>
+            <h3 className="text-sm font-black text-slate-900 dark:text-white uppercase tracking-widest mb-1">Итог сессии</h3>
             
-            <div className="space-y-4 mb-8 text-left bg-white/5 p-4 rounded-xl border border-white/10">
+            <div className="w-full bg-slate-50 dark:bg-black/30 rounded-xl p-3 mt-3 border border-slate-100 dark:border-white/5 space-y-3">
               <div className="flex justify-between items-center">
-                <span className="text-gray-400 text-sm">Потреблено:</span>
-                <span className="text-white font-bold text-lg">{summaryModalData.kwh.toFixed(2)} kWh</span>
+                <span className="text-slate-500 text-[10px] font-bold uppercase tracking-widest">Энергия</span>
+                <span className="font-mono font-black text-emerald-500 text-sm">{receipt.kwh?.toFixed(3)} <span className="text-[10px]">kWh</span></span>
               </div>
-              <div className="h-px w-full bg-white/10"></div>
-              <div className="flex justify-between items-center">
-                <span className="text-gray-400 text-sm">К оплате:</span>
-                <span className="text-emerald-400 font-black text-2xl">{summaryModalData.tjs.toFixed(2)} TJS</span>
+              <div className="flex justify-between items-center border-t border-slate-200 dark:border-white/10 pt-3">
+                <span className="text-slate-500 text-[10px] font-bold uppercase tracking-widest">Сумма</span>
+                <span className="font-mono font-black text-slate-900 dark:text-white text-base">{receipt.tjs?.toFixed(2)} <span className="text-[10px]">TJS</span></span>
               </div>
             </div>
-
-            <button
-              onClick={() => setSummaryModalData(null)}
-              className="w-full py-4 bg-white/10 hover:bg-white/20 text-white rounded-xl font-bold uppercase text-sm transition-colors"
-            >
-              Закрыть
-            </button>
           </div>
+          
+          <button onClick={closeReceipt} className="w-full mt-3 shrink-0 bg-slate-200 hover:bg-slate-300 dark:bg-white/10 dark:hover:bg-white/20 text-slate-900 dark:text-white py-3 rounded-xl font-black uppercase tracking-widest text-[10px] flex items-center justify-center gap-2 transition-all active:scale-95">
+            <X className="w-4 h-4" /> Закрыть чек
+          </button>
         </div>
       )}
     </div>

@@ -85,11 +85,11 @@ const AdminStationManager: React.FC = () => {
   };
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 text-left">
       <div className="flex justify-between items-center mb-4">
-        <div>
-          <h2 className="text-2xl font-black text-gray-900 dark:text-white uppercase tracking-tighter">Оборудование</h2>
-          <p className="text-[10px] text-gray-400 dark:text-app-muted font-bold uppercase tracking-widest text-emerald-500">Мониторинг и управление</p>
+        <div className="text-left">
+          <h2 className="text-2xl font-black text-slate-900 dark:text-white uppercase tracking-tighter text-left">Оборудование</h2>
+          <p className="text-[10px] text-slate-500 dark:text-app-muted font-bold uppercase tracking-widest text-emerald-500 text-left">Мониторинг и управление</p>
         </div>
         <Button 
           variant="primary" 
@@ -100,9 +100,9 @@ const AdminStationManager: React.FC = () => {
         </Button>
       </div>
 
-      <div className="bg-white dark:bg-app-card rounded-[2.5rem] border border-gray-100 dark:border-app-border overflow-hidden shadow-2xl">
+      <div className="bg-white dark:bg-app-card rounded-[2.5rem] border border-slate-200 dark:border-app-border overflow-hidden shadow-sm dark:shadow-2xl">
         <table className="w-full text-left">
-          <thead className="bg-gray-50 dark:bg-app-bg text-gray-400 dark:text-app-muted uppercase text-[10px] font-black tracking-widest border-b border-gray-100 dark:border-app-border">
+          <thead className="bg-slate-50 dark:bg-app-bg text-slate-400 dark:text-app-muted uppercase text-[10px] font-black tracking-widest border-b border-slate-200 dark:border-app-border">
             <tr>
               <th className="p-6">Название колонки</th>
               <th className="p-6">Серийный номер</th>
@@ -111,23 +111,23 @@ const AdminStationManager: React.FC = () => {
               <th className="p-6 text-right">Действия</th>
             </tr>
           </thead>
-          <tbody className="divide-y divide-gray-50 dark:divide-app-border">
+          <tbody className="divide-y divide-slate-100 dark:divide-app-border">
             {stations.map(s => (
-              <tr key={s.id} className="hover:bg-gray-50 dark:hover:bg-white/5 transition-all group">
+              <tr key={s.id} className="hover:bg-slate-50 dark:hover:bg-white/5 transition-all group">
                 <td className="p-6">
-                  <div className="flex items-center gap-4">
-                    <div className={`w-10 h-10 rounded-xl flex items-center justify-center border ${s.status === 'online' ? 'bg-emerald-50 text-emerald-500 border-emerald-100 dark:bg-emerald-500/10 dark:border-emerald-500/20' : 'bg-red-50 text-red-500 border-red-100 dark:bg-red-500/10 dark:border-red-500/20'}`}>
+                  <div className="flex items-center gap-4 text-left">
+                    <div className={`w-10 h-10 rounded-xl flex items-center justify-center border transition-colors ${s.status === 'online' ? 'bg-emerald-50 text-emerald-500 border-emerald-100 dark:bg-emerald-500/10 dark:border-emerald-500/20' : 'bg-red-50 text-red-500 border-red-100 dark:bg-red-500/10 dark:border-red-500/20'}`}>
                       <LayoutGrid className="w-5 h-5" />
                     </div>
-                    <span className="font-black text-gray-900 dark:text-white uppercase text-sm">{s.name}</span>
+                    <span className="font-black text-slate-900 dark:text-white uppercase text-sm">{s.name}</span>
                   </div>
                 </td>
-                <td className="p-6 font-mono text-xs text-gray-400 dark:text-app-muted font-bold tracking-tight">{s.serial_number}</td>
-                <td className="p-6 text-center font-black text-sm text-gray-900 dark:text-white">
+                <td className="p-6 font-mono text-xs text-slate-400 dark:text-app-muted font-bold tracking-tight">{s.serial_number}</td>
+                <td className="p-6 text-center font-black text-sm text-slate-900 dark:text-white">
                   {s.connectors?.length || 0}
                 </td>
                 <td className="p-6 text-center">
-                  <span className={`inline-flex items-center gap-2 px-4 py-1.5 rounded-full text-[10px] font-black uppercase tracking-tight ${s.status === 'online' ? 'bg-emerald-500 text-white shadow-lg shadow-emerald-500/20' : 'bg-gray-400 text-white'}`}>
+                  <span className={`inline-flex items-center gap-2 px-4 py-1.5 rounded-full text-[10px] font-black uppercase tracking-tight shadow-sm ${s.status === 'online' ? 'bg-emerald-500 text-white shadow-emerald-500/20' : 'bg-slate-400 text-white'}`}>
                     {s.status === 'online' ? 'В сети' : 'Оффлайн'}
                   </span>
                 </td>
@@ -151,11 +151,11 @@ const AdminStationManager: React.FC = () => {
               <tr>
                 <td colSpan={5}>
                   <div className="flex flex-col items-center justify-center py-20 text-center">
-                    <div className="p-4 bg-gray-50 dark:bg-white/5 rounded-full mb-4 border border-gray-100 dark:border-white/5">
-                      <ServerOff className="w-8 h-8 text-gray-400 dark:text-app-muted" />
+                    <div className="p-4 bg-slate-50 dark:bg-white/5 rounded-full mb-4 border border-slate-100 dark:border-white/5 shadow-inner">
+                      <ServerOff className="w-8 h-8 text-slate-400 dark:text-app-muted" />
                     </div>
-                    <h3 className="text-xl font-black text-gray-900 dark:text-white uppercase tracking-tighter mb-2">Станций не найдено</h3>
-                    <p className="text-xs text-gray-500 dark:text-app-muted font-bold uppercase tracking-widest max-w-sm mb-6">В системе пока нет зарегистрированного оборудования. Добавьте первую зарядную станцию.</p>
+                    <h3 className="text-xl font-black text-slate-900 dark:text-white uppercase tracking-tighter mb-2">Станций не найдено</h3>
+                    <p className="text-xs text-slate-500 dark:text-app-muted font-bold uppercase tracking-widest max-w-sm mb-6">В системе пока нет зарегистрированного оборудования. Добавьте первую зарядную станцию.</p>
                     <Button variant="outline" onClick={handleOpenAdd} icon={<Plus className="w-4 h-4" />}>
                       Добавить станцию
                     </Button>
@@ -169,47 +169,47 @@ const AdminStationManager: React.FC = () => {
 
       {/* Modal */}
       {isModalOpen && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[100] flex items-center justify-center p-6">
-          <div className="bg-white dark:bg-app-card rounded-[3rem] p-10 max-w-md w-full shadow-2xl animate-in fade-in zoom-in-95 relative border border-gray-100 dark:border-app-border">
-            <button onClick={() => setIsModalOpen(false)} className="absolute right-6 top-6 p-2 hover:bg-gray-100 dark:hover:bg-white/10 rounded-full transition-colors">
-              <X className="w-5 h-5 text-gray-500" />
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[100] flex items-center justify-center p-6">
+          <div className="bg-white dark:bg-app-card rounded-[3rem] p-10 max-w-md w-full shadow-2xl animate-in fade-in zoom-in-95 relative border border-slate-200 dark:border-app-border text-left">
+            <button onClick={() => setIsModalOpen(false)} className="absolute right-6 top-6 p-2 hover:bg-slate-100 dark:hover:bg-white/10 rounded-full transition-colors">
+              <X className="w-5 h-5 text-slate-500" />
             </button>
-            <h3 className="text-2xl font-black text-gray-900 dark:text-white uppercase tracking-tighter mb-8">
+            <h3 className="text-2xl font-black text-slate-900 dark:text-white uppercase tracking-tighter mb-8">
               {isEditMode ? 'Редактировать' : 'Новая станция'}
             </h3>
             <form onSubmit={handleSubmit} className="space-y-5">
               <div className="space-y-1">
-                <label className="text-[10px] font-black text-gray-400 dark:text-app-muted uppercase ml-2 tracking-widest">Название станции</label>
+                <label className="text-[10px] font-black text-slate-400 dark:text-app-muted uppercase ml-2 tracking-widest text-left block">Название станции</label>
                 <input 
                   type="text" 
                   placeholder="Например: Станция #5" 
                   required
-                  className="w-full bg-gray-50 dark:bg-app-bg border border-gray-100 dark:border-app-border p-4 rounded-2xl outline-none focus:ring-4 focus:ring-emerald-500/10 focus:border-emerald-500 dark:text-white font-bold transition-all"
+                  className="w-full bg-slate-50 dark:bg-app-bg border border-slate-200 dark:border-app-border p-4 rounded-2xl outline-none focus:ring-4 focus:ring-emerald-500/10 focus:border-emerald-500 dark:text-white font-bold transition-all placeholder:text-slate-400 dark:placeholder:text-gray-300"
                   value={stationForm.name}
                   onChange={e => setStationForm({...stationForm, name: e.target.value})}
                 />
               </div>
               <div className="space-y-1">
-                <label className="text-[10px] font-black text-gray-400 dark:text-app-muted uppercase ml-2 tracking-widest">Серийный номер</label>
+                <label className="text-[10px] font-black text-slate-400 dark:text-app-muted uppercase ml-2 tracking-widest text-left block">Серийный номер</label>
                 <input 
                   type="text" 
                   placeholder="SN-XXXX-XXXX" 
                   required
                   disabled={isEditMode}
-                  className="w-full bg-gray-50 dark:bg-app-bg border border-gray-100 dark:border-app-border p-4 rounded-2xl outline-none focus:ring-4 focus:ring-emerald-500/10 focus:border-emerald-500 dark:text-white font-mono transition-all uppercase disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="w-full bg-slate-50 dark:bg-app-bg border border-slate-200 dark:border-app-border p-4 rounded-2xl outline-none focus:ring-4 focus:ring-emerald-500/10 focus:border-emerald-500 dark:text-white font-mono transition-all uppercase disabled:opacity-50 disabled:cursor-not-allowed placeholder:text-slate-400 dark:placeholder:text-gray-300"
                   value={stationForm.serial_number}
                   onChange={e => setStationForm({...stationForm, serial_number: e.target.value})}
                 />
               </div>
               <div className="space-y-1">
-                <label className="text-[10px] font-black text-gray-400 dark:text-app-muted uppercase ml-2 tracking-widest">Количество коннекторов</label>
+                <label className="text-[10px] font-black text-slate-400 dark:text-app-muted uppercase ml-2 tracking-widest text-left block">Количество коннекторов</label>
                 <input 
                   type="number" 
                   min="1" 
                   max="4" 
                   required
                   disabled={isEditMode}
-                  className="w-full bg-gray-50 dark:bg-app-bg border border-gray-100 dark:border-app-border p-4 rounded-2xl outline-none focus:ring-4 focus:ring-emerald-500/10 focus:border-emerald-500 dark:text-white font-bold transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="w-full bg-slate-50 dark:bg-app-bg border border-slate-200 dark:border-app-border p-4 rounded-2xl outline-none focus:ring-4 focus:ring-emerald-500/10 focus:border-emerald-500 dark:text-white font-bold transition-all disabled:opacity-50 disabled:cursor-not-allowed placeholder:text-slate-400 dark:placeholder:text-gray-300"
                   value={stationForm.connectorsCount}
                   onChange={e => setStationForm({...stationForm, connectorsCount: parseInt(e.target.value)})}
                 />

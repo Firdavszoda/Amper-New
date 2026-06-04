@@ -1,16 +1,49 @@
 @import "tailwindcss";
 
-/* Регистрируем наши кастомные цвета прямо в теме Tailwind */
+/* КРИТИЧЕСКИ ВАЖНО ДЛЯ TAILWIND v4: Включаем поддержку темной темы по классу .dark */
+@variant dark (.dark &);
+
+/* Регистрируем наши кастомные цвета прямо в теме Tailwind v4 */
 @theme {
   --color-app-bg: #0f172a;
-  --color-app-card: #1e293b;
-  --color-app-border: #334155;
+  --color-app-card: #1a1f2e;
+  --color-app-border: rgba(255, 255, 255, 0.1);
   --color-app-accent: #3b82f6;
   --color-app-muted: #94a3b8;
   --color-app-danger: #ef4444;
 }
 
-/* Настройки для всего приложения (светлая/темная тема) */
+/* Глобальные стили для body через стандартный CSS (будет плавно переключаться) */
 body {
-  @apply bg-gray-50 dark:bg-app-bg text-gray-900 dark:text-white antialiased transition-colors duration-300;
+  background-color: #f8fafc; /* bg-slate-50 */
+  color: #0f172a;            /* text-slate-900 */
+  transition: background-color 0.3s, color 0.3s;
+  font-family: system-ui, -apple-system, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Стили при активном классе .dark на теге html */
+.dark body {
+  background-color: #0f172a; /* наша фирменная темная подложка */
+  color: #ffffff;
+}
+
+/* Скрываем стрелки у number input */
+input[type="number"]::-webkit-inner-spin-button,
+input[type="number"]::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+input[type="number"] {
+  -moz-appearance: textfield;
+}
+
+@layer utilities {
+  .no-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+  .no-scrollbar {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
 }

@@ -45,7 +45,7 @@ router.delete('/users/:id', async (req, res) => {
 // --- 2. УПРАВЛЕНИЕ СТАНЦИЯМИ ---
 
 // Изменить статус станции (принудительно)
-router.patch('/stations/:id/status', async (req, res) => {
+router.patch('/stations/:id/status', async (req: any, res) => {
   const { status } = req.body; // online, offline, faulted
   try {
     const db = await getDB();
@@ -61,6 +61,11 @@ router.patch('/stations/:id/status', async (req, res) => {
     await db.run('UPDATE connectors SET status = ? WHERE station_id = ?', [connectorStatus, req.params.id]);
     
     await db.run('COMMIT');
+    
+    if (req.io) {
+      req.io.emit('station_status_update');
+    }
+    
     res.json({ success: true });
   } catch (error) {
     const db = await getDB();

@@ -21,9 +21,9 @@ router.post('/start', async (req, res) => {
     await db.run('BEGIN TRANSACTION');
 
     const result = await db.run(
-      `INSERT INTO transactions (shift_id, connector_id, amount_tjs, target_kwh, consumed_kwh, status, created_at) 
-       VALUES (?, ?, ?, ?, 0, 'charging', datetime("now"))`,
-      [shift_id, connector_id, amount_tjs, target_kwh]
+      `INSERT INTO transactions (shift_id, connector_id, amount_tjs, target_kwh, consumed_kwh, status, is_full_tank, start_time) 
+       VALUES (?, ?, ?, ?, 0, 'charging', ?, CURRENT_TIMESTAMP)`,
+      [shift_id, connector_id, amount_tjs, target_kwh, is_full_tank ? 1 : 0]
     );
 
     const transactionId = result.lastID;
@@ -39,11 +39,8 @@ router.post('/start', async (req, res) => {
       );
 
       if (station) {
-        const match = station.name?.match(/\d+/);
-        const physicalConnectorId = match ? parseInt(match[0], 10) : 1;
-
         console.log(`🚀 Запуск транзакции #${transactionId} на станции ${station.serial_number}`);
-        remoteStart(station.serial_number, physicalConnectorId, "KASSA", transactionId);
+        remoteStart(station.serial_number, connector_id, "KASSA", transactionId);
       }
     } catch (e) {
       console.error('Ошибка отправки RemoteStart в OCPP:', e);
@@ -95,15 +92,13 @@ router.post('/stop', async (req, res) => {
 
     // Находим серийник станции для OCPP
     const stationData = await db.get(
-      'SELECT s.serial_number, c.name FROM stations s JOIN connectors c ON s.id = c.station_id WHERE c.id = ?', 
+      'SELECT s.serial_number FROM stations s JOIN connectors c ON s.id = c.station_id WHERE c.id = ?', 
       [connector_id]
     );
 
     if (stationData) {
-      const match = stationData.name?.match(/\d+/);
-      const physicalConnectorId = match ? parseInt(match[0], 10) : 1;
-      // Отправляем точный, железобетонный ID в эмулятор
-      remoteStop(stationData.serial_number, targetTxId, physicalConnectorId);
+      // ИСПРАВЛЕНИЕ: Вызываем remoteStop строго с 2 аргументами (без physicalConnectorId)
+      remoteStop(stationData.serial_number, targetTxId);
       res.json({ success: true, stopped_transaction_id: targetTxId });
     } else {
       res.status(404).json({ error: 'Станция не найдена' });
