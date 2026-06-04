@@ -59,11 +59,8 @@ const AdminStationManager: React.FC = () => {
     setIsLoading(true);
     try {
       if (isEditMode && editingId) {
-        // Edit station
         await api.updateStation(editingId, { name: stationForm.name });
-        // Serial number & connectors count updates can be complex (we skip full connector rebuild for now)
       } else {
-        // Create station
         const connectors = Array.from({ length: stationForm.connectorsCount }).map((_, i) => ({
           name: `${i + 1}-Ручка-${String.fromCharCode(65 + i)}`,
           type: 'GB_T_DC',

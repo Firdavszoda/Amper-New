@@ -2,60 +2,34 @@ import React, { useEffect, useState } from 'react';
 import { useAuthStore } from '../store/useAuthStore';
 import { useStore } from '../store/useStore';
 import StationCard from './StationCard';
-import { LayoutGrid, Power, Clock } from 'lucide-react';
 
 const CashierDashboard: React.FC = () => {
   const { user } = useAuthStore();
-  
-  // ИСПРАВЛЕНО: Добавили initSocket сюда!
-  const { stations, activeTransactions, fetchStations, startCharging, stopCharging, initSocket } = useStore();
+  const { 
+    stations, 
+    activeTransactions, 
+    currentShift, 
+    fetchStations, 
+    startCharging, 
+    stopCharging, 
+    initSocket,
+    openShift,
+    checkShift
+  } = useStore();
 
-  const [currentShift, setCurrentShift] = useState<any>(null);
-  const [loading, setLoading] = useState(true);
+  const [isOpening, setIsOpening] = useState(false);
 
-  // ИСПРАВЛЕНО: Включаем прослушку сокетов при загрузке страницы!
+  // Инициализация сокетов
   useEffect(() => {
     initSocket();
   }, [initSocket]);
 
-  // Проверка статуса смены на бэкенде
+  // Проверка статуса смены при загрузке
   useEffect(() => {
-    const checkShift = async () => {
-      if (user) {
-        try {
-          const response = await fetch(`http://localhost:3000/api/shifts/current/${user.id}`);
-          const data = await response.json();
-          setCurrentShift(data);
-          // Если смена открыта, загружаем станции
-          if (data && data.status === 'open') {
-            await fetchStations();
-          }
-        } catch (error) {
-          console.warn('Бэкенд недоступен или ошибка при проверке смены.');
-        } finally {
-          setLoading(false);
-        }
-      }
-    };
-    checkShift();
-  }, [user, fetchStations]);
-
-  const openShift = async () => {
-    try {
-      const res = await fetch('http://localhost:3000/api/shifts/open', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ userId: user?.id })
-      });
-      const data = await res.json();
-      if (data.error) throw new Error(data.error);
-      setCurrentShift(data);
-      // После открытия смены загружаем станции
-      await fetchStations();
-    } catch (error) {
-      alert('Ошибка открытия смены');
+    if (user) {
+      checkShift(user.id);
     }
-  };
+  }, [user, checkShift]);
 
   const handleStartCharging = (connectorId: number, amount: number, isFullTank: boolean) => {
     if (currentShift) {
@@ -63,100 +37,62 @@ const CashierDashboard: React.FC = () => {
     }
   };
 
-  const closeShift = async () => {
-    if (!currentShift) return;
-    try {
-      const res = await fetch('http://localhost:3000/api/shifts/close', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ shiftId: currentShift.id })
-      });
-      const data = await res.json();
-      alert(`Смена завершена! Выручка за период: ${data.revenue} TJS`);
-      setCurrentShift(null);
-    } catch (error) {
-      alert('Ошибка закрытия смены');
-    }
-  };
-
-  if (loading) {
+  // Если смена НЕ открыта — показываем экран блокировки
+  if (!currentShift) {
     return (
-      <div className="min-h-screen flex items-center justify-center font-black text-gray-400 dark:text-app-muted animate-pulse bg-gray-50 dark:bg-app-bg">
-        ЗАГРУЗКА ДАННЫХ КАССЫ...
+      <div className="flex items-center justify-center min-h-[calc(100vh-80px)] p-6">
+        <div className="max-w-md w-full bg-[#1a1f2e] border border-white/10 rounded-[2rem] p-10 text-center shadow-2xl relative overflow-hidden">
+          {/* Декоративное свечение */}
+          <div className="absolute top-0 left-1/2 -translate-x-1/2 w-full h-32 bg-emerald-500/20 blur-[50px] pointer-events-none"></div>
+          
+          <div className="relative z-10">
+            <div className="w-24 h-24 bg-emerald-500/10 border border-emerald-500/20 rounded-full flex items-center justify-center mx-auto mb-6 shadow-[0_0_30px_rgba(16,185,129,0.15)]">
+              <svg className="w-10 h-10 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8V7a4 4 0 00-8 0v4h8z" /></svg>
+            </div>
+            
+            <h2 className="text-2xl font-black text-white mb-3 uppercase tracking-widest">Доступ закрыт</h2>
+            <p className="text-gray-400 text-sm mb-8 leading-relaxed font-medium">
+              Привет, <span className="text-emerald-400">{user?.username}</span>! Чтобы начать управлять станциями и принимать платежи, необходимо открыть кассовую смену.
+            </p>
+            
+            <button 
+              onClick={async () => {
+                setIsOpening(true);
+                try { await openShift(user?.id); } catch(e) { console.error(e); } finally { setIsOpening(false); }
+              }}
+              disabled={isOpening}
+              className="w-full bg-emerald-600 hover:bg-emerald-500 text-white px-8 py-4 rounded-xl font-black text-sm uppercase tracking-widest transition-all shadow-lg shadow-emerald-900/20 active:scale-95 disabled:opacity-50 flex items-center justify-center gap-3"
+            >
+              {isOpening ? 'Открытие...' : 'Открыть смену'}
+              {!isOpening && <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M14 5l7 7m0 0l-7 7m7-7H3" /></svg>}
+            </button>
+          </div>
+        </div>
       </div>
     );
   }
 
+  // Если смена ОТКРЫТА — код рендера станций
   return (
-    <div className="min-h-screen bg-gray-50 dark:bg-app-bg transition-colors duration-300">
-      {/* HEADER */}
-      <header className="bg-white dark:bg-app-card border-b border-gray-100 dark:border-app-border p-4 sticky top-0 z-50">
-        <div className="max-w-7xl mx-auto flex justify-between items-center">
-          <div className="flex items-center gap-4">
-            <h1 className="text-xl font-black text-gray-900 dark:text-white uppercase tracking-tighter">
-              Рабочее место кассира
-            </h1>
-            {currentShift && (
-              <span className="px-3 py-1 bg-emerald-500/10 text-emerald-500 rounded-full text-[10px] font-black uppercase shadow-sm border border-emerald-500/20">
-                Смена #{currentShift.id || 'АКТИВНА'} открыта
-              </span>
-            )}
+    <div className="min-h-screen bg-gray-50 dark:bg-[#121621] transition-colors duration-300">
+      <main className="max-w-7xl mx-auto p-6 pt-8">
+        <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
+          <div className="flex items-center gap-2 mb-6 text-gray-400">
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z" /></svg>
+            <h2 className="text-sm font-bold uppercase tracking-widest">Станции</h2>
           </div>
-
-          {currentShift && (
-            <button
-              onClick={closeShift}
-              className="flex items-center gap-2 px-4 py-2 bg-red-500 hover:bg-red-600 text-white rounded-xl text-xs font-black uppercase transition-all shadow-lg shadow-red-500/20 active:scale-95"
-            >
-              <Power className="w-4 h-4" />
-              Завершить смену
-            </button>
-          )}
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
+            {stations.map(station => (
+              <StationCard
+                key={station.id}
+                station={station}
+                activeTransactions={activeTransactions}
+                onStartCharging={handleStartCharging}
+                onStopCharging={stopCharging}
+              />
+            ))}
+          </div>
         </div>
-      </header>
-
-      <main className="max-w-7xl mx-auto p-6">
-        {!currentShift ? (
-          /* ЭКРАН ЗАКРЫТОЙ СМЕНЫ */
-          <div className="flex flex-col items-center justify-center py-20 animate-in fade-in zoom-in-95 duration-500">
-            <div className="bg-white dark:bg-app-card p-10 rounded-[3rem] shadow-2xl border border-gray-100 dark:border-app-border text-center space-y-6 max-w-lg w-full relative overflow-hidden">
-              <div className="inline-flex p-6 bg-gray-50 dark:bg-app-bg rounded-full relative z-10 border border-gray-100 dark:border-app-border">
-                <Clock className="w-12 h-12 text-gray-400 dark:text-app-muted" />
-              </div>
-              <div className="space-y-2 relative z-10">
-                <h2 className="text-3xl font-black text-gray-900 dark:text-white uppercase tracking-tight">Смена закрыта</h2>
-                <p className="text-gray-500 dark:text-app-muted font-bold text-sm uppercase">Для начала работы необходимо открыть кассу</p>
-              </div>
-
-              <button
-                onClick={openShift}
-                className="w-full py-5 bg-emerald-500 hover:bg-emerald-600 text-white rounded-2xl font-black text-xl uppercase shadow-xl shadow-emerald-500/20 transition-all active:scale-[0.98] relative z-10"
-              >
-                Открыть смену
-              </button>
-            </div>
-          </div>
-        ) : (
-          /* ЭКРАН РАБОТЫ (СТАНЦИИ) */
-          <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
-            <div className="flex items-center gap-2 mb-2">
-              <LayoutGrid className="w-5 h-5 text-gray-400" />
-              <h2 className="text-sm font-bold uppercase tracking-widest text-gray-400">Станции</h2>
-            </div>
-            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
-              {stations.map(station => (
-                <StationCard
-                  key={station.id}
-                  station={station}
-                  // Передаем правильные данные и функции для новых ручек
-                  activeTransactions={activeTransactions}
-                  onStartCharging={handleStartCharging}
-                  onStopCharging={stopCharging}
-                />
-              ))}
-            </div>
-          </div>
-        )}
       </main>
     </div>
   );

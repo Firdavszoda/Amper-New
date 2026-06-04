@@ -22,14 +22,37 @@ const AdminDashboard: React.FC = () => {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [newUser, setNewUser] = useState({ username: '', password: '', role: 'cashier' });
   const [loading, setLoading] = useState(true);
+  const [price, setPrice] = useState<number | string>('');
+  const [isSavingPrice, setIsSavingPrice] = useState(false);
 
   useEffect(() => {
     const init = async () => {
-      await Promise.all([fetchData(), fetchStations()]);
+      await Promise.all([fetchData(), fetchStations(), fetchPrice()]);
       setLoading(false);
     };
     init();
   }, []);
+
+  const fetchPrice = async () => {
+    try {
+      const data = await api.getPrice();
+      setPrice(data.price_per_kwh);
+    } catch (e) {
+      console.error("Ошибка загрузки тарифа:", e);
+    }
+  };
+
+  const handleSavePrice = async () => {
+    setIsSavingPrice(true);
+    try {
+      await api.updatePrice(parseFloat(price as string));
+      alert('Тариф успешно обновлен во всей системе!');
+    } catch (e) {
+      alert('Ошибка при сохранении тарифа');
+    } finally {
+      setIsSavingPrice(false);
+    }
+  };
 
   const fetchData = async () => {
     try {
@@ -77,6 +100,37 @@ const AdminDashboard: React.FC = () => {
 
   const renderOverview = () => (
     <div className="space-y-10 animate-in fade-in slide-in-from-right-8 duration-500">
+      
+      {/* УПРАВЛЕНИЕ ТАРИФОМ */}
+      <div className="bg-white dark:bg-app-card border border-gray-100 dark:border-app-border p-8 rounded-[2.5rem] shadow-xl">
+        <div className="flex flex-col md:flex-row justify-between items-center gap-6">
+          <div className="text-left">
+            <h3 className="text-lg font-black text-gray-900 dark:text-white uppercase tracking-tighter flex items-center gap-2">
+              <Zap className="w-5 h-5 text-emerald-500" /> Управление тарифом
+            </h3>
+            <p className="text-[10px] text-gray-400 dark:text-app-muted font-bold uppercase tracking-widest mt-1">Стоимость электроэнергии для клиентов</p>
+          </div>
+          
+          <div className="flex items-center gap-4 w-full md:w-auto">
+            <div className="relative flex-1 md:w-48">
+              <input 
+                type="number" step="0.1"
+                value={price}
+                onChange={(e) => setPrice(e.target.value)}
+                className="w-full bg-gray-50 dark:bg-app-bg border border-gray-100 dark:border-app-border rounded-2xl px-6 py-4 text-gray-900 dark:text-white font-black text-xl focus:outline-none focus:ring-4 focus:ring-emerald-500/10 focus:border-emerald-500 transition-all"
+              />
+              <span className="absolute right-6 top-5 text-[10px] font-black text-gray-400 uppercase tracking-widest">TJS/кВт⋅ч</span>
+            </div>
+            <button 
+              onClick={handleSavePrice} disabled={isSavingPrice}
+              className="bg-emerald-500 hover:bg-emerald-600 text-white px-10 py-5 rounded-2xl font-black text-xs uppercase tracking-widest transition-all shadow-xl shadow-emerald-500/20 active:scale-95 disabled:opacity-50"
+            >
+              {isSavingPrice ? '...' : 'Обновить'}
+            </button>
+          </div>
+        </div>
+      </div>
+
       <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
         <StatCard label="Выручка (Месяц)" value={analytics?.totalRevenue?.toFixed(2) || "0.00"} suffix="TJS" icon={<TrendingUp />} color="emerald" />
         <StatCard label="Активные сессии" value={analytics?.totalSessions || 0} icon={<Zap />} color="blue" />
@@ -183,6 +237,13 @@ const AdminDashboard: React.FC = () => {
           <NavItem active={activeTab === 'overview'} onClick={() => setActiveTab('overview')} icon={<BarChart3 />} label="Главная" />
           <NavItem active={activeTab === 'team'} onClick={() => setActiveTab('team')} icon={<Users />} label="Сотрудники" />
           <NavItem active={activeTab === 'hardware'} onClick={() => setActiveTab('hardware')} icon={<LayoutGrid />} label="Оборудование" />
+          <button 
+            onClick={() => navigate('/reports')}
+            className="w-full flex items-center gap-5 p-5 rounded-[1.25rem] transition-all text-gray-400 dark:text-app-muted hover:bg-gray-100 dark:hover:bg-white/5 hover:text-gray-900 dark:hover:text-white group"
+          >
+            <Zap className="w-5 h-5" />
+            <span className="hidden md:block font-black uppercase text-[11px] tracking-widest">Отчеты</span>
+          </button>
           <NavItem active={activeTab === 'security'} onClick={() => setActiveTab('security')} icon={<ShieldAlert />} label="Защита" />
         </nav>
 

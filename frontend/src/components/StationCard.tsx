@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { BatteryFull, Play, X } from 'lucide-react';
 import type { Station, ActiveTransaction } from '../types';
 import StatusBadge from './ui/StatusBadge';
@@ -51,6 +51,22 @@ const ConnectorPanel: React.FC<any> = ({ connector, activeTx, onStart, onStop })
   const [isFullTankModalOpen, setIsFullTankModalOpen] = useState(false);
   const [pendingFullTankData, setPendingFullTankData] = useState<{ connectorId: number } | null>(null);
   const [summaryModalData, setSummaryModalData] = useState<{tjs: number, kwh: number} | null>(null);
+  const [prevTx, setPrevTx] = useState<any>(null);
+
+  useEffect(() => {
+    if (activeTx) {
+      // Транзакция активна - запоминаем актуальные данные
+      setPrevTx(activeTx);
+    } else if (!activeTx && prevTx) {
+      // Транзакция исчезла (Авто-стоп сервера). Вызываем чек!
+      setSummaryModalData({
+        tjs: prevTx.amount_tjs || 0,
+        kwh: prevTx.consumed_kwh || 0
+      });
+      setPrevTx(null); // Очищаем память
+      if (typeof setAmount === 'function') setAmount('');
+    }
+  }, [activeTx]);
 
   const isCharging = connector.status === 'charging' && activeTx;
 
@@ -73,19 +89,8 @@ const ConnectorPanel: React.FC<any> = ({ connector, activeTx, onStart, onStop })
   };
 
   const handleStopClick = () => {
-    // 1. Показываем чек с финальными данными из активной транзакции
-    setSummaryModalData({
-      tjs: activeTx?.amount_tjs || 0,
-      kwh: activeTx?.consumed_kwh || 0
-    });
-    
-    // 2. Отправляем команду стоп
-    if (activeTx) {
-      onStop(activeTx.id, connector.id);
-    }
-    
-    // 3. Очищаем поле ввода суммы
-    setAmount(''); 
+    if (!activeTx) return;
+    onStop(activeTx.id, connector.id);
   };
 
   return (
@@ -128,7 +133,6 @@ const ConnectorPanel: React.FC<any> = ({ connector, activeTx, onStart, onStop })
               </p>
             </div>
             
-            {/* ИСПРАВЛЕННАЯ КНОПКА СТОП */}
             <button 
               onClick={handleStopClick} 
               className="flex ml-[5px] items-center justify-center w-12 h-12 bg-red-500/10 hover:bg-red-500 text-red-500 hover:text-white rounded-xl border border-red-500/20 transition-all outline-none focus:outline-none focus:ring-0 active:scale-95 shadow-lg hover:shadow-red-500/30"

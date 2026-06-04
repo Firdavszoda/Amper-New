@@ -91,14 +91,10 @@ export async function initDB() {
       FOREIGN KEY (station_id) REFERENCES stations(id)
     );
 
-    -- 7. НОВАЯ: Общая таблица логов действий пользователей
-    CREATE TABLE IF NOT EXISTS logs (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      user_id INTEGER,
-      action TEXT NOT NULL,
-      details TEXT,
-      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-      FOREIGN KEY (user_id) REFERENCES users(id)
+    -- 8. Таблица настроек системы
+    CREATE TABLE IF NOT EXISTS settings (
+      key TEXT PRIMARY KEY, 
+      value TEXT
     );
   `);
 
@@ -112,6 +108,9 @@ export async function initDB() {
       console.log('Информация: колонка meter_start уже существует или произошла некритичная ошибка.');
     }
   }
+
+  // Установка настроек по умолчанию
+  await dbInstance.run(`INSERT OR IGNORE INTO settings (key, value) VALUES ('smart_stop_reserve_sec', '20')`);
 
   await seedInitialData();
   console.log('✅ База данных SQLite успешно инициализирована (Защита уровня PRO + Смены + Ручки + Логи)!');

@@ -1,4 +1,5 @@
 import type { Station } from '../types';
+import { useAuthStore } from '../store/useAuthStore';
 
 const API_BASE_URL = 'http://localhost:3000/api';
 
@@ -13,10 +14,19 @@ class ApiError extends Error {
 
 async function request<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
   const url = `${API_BASE_URL}${endpoint}`;
-  const headers = {
+  
+  // Получаем текущего пользователя из стора для передачи в заголовках
+  const user = useAuthStore.getState().user;
+  
+  const headers: any = {
     'Content-Type': 'application/json',
     ...options.headers,
   };
+
+  if (user) {
+    headers['x-user-id'] = user.id.toString();
+    headers['x-user-role'] = user.role;
+  }
 
   try {
     const response = await fetch(url, { ...options, headers });
@@ -70,4 +80,43 @@ export const api = {
   getCurrentShift: (userId: number) => request<any>(`/shifts/current/${userId}`),
   openShift: (userId: number) => request<any>('/shifts/open', { method: 'POST', body: JSON.stringify({ userId }) }),
   closeShift: (shiftId: number) => request<any>('/shifts/close', { method: 'POST', body: JSON.stringify({ shiftId }) }),
+
+  // Settings
+  getSettings: () => request<{ price_per_kwh: number; smart_stop_reserve_sec: number }>('/settings/all'),
+  getPrice: () => request<{ price_per_kwh: number }>('/settings/price'),
+  updatePrice: (price_per_kwh: number) => request<any>('/settings/price', { method: 'POST', body: JSON.stringify({ price_per_kwh }) }),
+  updateReserve: (smart_stop_reserve_sec: number) => request<any>('/settings/reserve', { method: 'POST', body: JSON.stringify({ smart_stop_reserve_sec }) }),
+
+  // Reports
+  reports: {
+    getTransactions: (params: any) => {
+      const filteredParams = Object.fromEntries(Object.entries(params).filter(([_, v]) => v != null && v !== ''));
+      const q = new URLSearchParams(filteredParams as any).toString();
+      return request<any>(`/reports/transactions?${q}`);
+    },
+    getSummary: (params: any) => {
+      const filteredParams = Object.fromEntries(Object.entries(params).filter(([_, v]) => v != null && v !== ''));
+      const q = new URLSearchParams(filteredParams as any).toString();
+      return request<any>(`/reports/summary?${q}`);
+    },
+    getAnalytics: (params: any) => {
+      const filteredParams = Object.fromEntries(Object.entries(params).filter(([_, v]) => v != null && v !== ''));
+      const q = new URLSearchParams(filteredParams as any).toString();
+      return request<any>(`/reports/analytics?${q}`);
+    },
+    downloadCsv: (params: any) => {
+      const user = useAuthStore.getState().user;
+      const filteredParams = Object.fromEntries(Object.entries(params).filter(([_, v]) => v != null && v !== ''));
+      const qParams = new URLSearchParams(filteredParams as any);
+      
+      // Для скачивания через window.open передаем ID/роль в query, 
+      // так как заголовки в window.open не прокинуть легко
+      if (user) {
+        qParams.append('userId', user.id.toString());
+        qParams.append('userRole', user.role);
+      }
+      
+      window.open(`${API_BASE_URL}/reports/export?${qParams.toString()}`, '_blank');
+    }
+  }
 };

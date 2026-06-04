@@ -49,9 +49,22 @@ router.patch('/stations/:id/status', async (req, res) => {
   const { status } = req.body; // online, offline, faulted
   try {
     const db = await getDB();
+    await db.run('BEGIN TRANSACTION');
+    
+    // 1. Обновляем статус самой колонки
     await db.run('UPDATE stations SET status = ? WHERE id = ?', [status, req.params.id]);
+    
+    // 2. Синхронно обновляем все ручки этой колонки
+    // Если колонка offline/faulted - ручки тоже становятся faulted (недоступны для зарядки)
+    // Если колонка online - ручки становятся available
+    const connectorStatus = status === 'online' ? 'available' : 'faulted';
+    await db.run('UPDATE connectors SET status = ? WHERE station_id = ?', [connectorStatus, req.params.id]);
+    
+    await db.run('COMMIT');
     res.json({ success: true });
   } catch (error) {
+    const db = await getDB();
+    await db.run('ROLLBACK');
     res.status(500).json({ error: 'Не удалось обновить статус' });
   }
 });

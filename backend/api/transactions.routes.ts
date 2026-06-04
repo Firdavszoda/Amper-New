@@ -1,17 +1,23 @@
 import { Router } from 'express';
 import { getDB, addLog } from '../database/db';
-import { remoteStart, remoteStop } from '../ocpp';
+import { remoteStart, remoteStop, globalPricePerKwh } from '../ocpp';
 
 const router = Router();
-const KWH_RATE = 3.5;
 
 // 1. Начать зарядку
 router.post('/start', async (req, res) => {
   const { shift_id, connector_id, amount_tjs, is_full_tank } = req.body;
-  const target_kwh = is_full_tank ? 999 : (amount_tjs / KWH_RATE);
-
+  
   try {
     const db = await getDB();
+
+    // ПРОВЕРКА СТАТУСА: Можно ли вообще заряжать?
+    const connectorStatus = await db.get('SELECT status FROM connectors WHERE id = ?', [connector_id]);
+    if (!connectorStatus || connectorStatus.status !== 'available') {
+      return res.status(400).json({ error: 'Коннектор недоступен (уже занят или отключен в админке)' });
+    }
+
+    const target_kwh = is_full_tank ? 999 : (amount_tjs / globalPricePerKwh);
     await db.run('BEGIN TRANSACTION');
 
     const result = await db.run(

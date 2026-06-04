@@ -6,6 +6,7 @@ import { api } from '../services/api';
 interface AppState {
   stations: Station[];
   activeTransactions: ActiveTransaction[];
+  currentShift: any | null;
   isLoading: boolean;
   error: string | null;
 
@@ -14,6 +15,10 @@ interface AppState {
   stopCharging: (transactionId: number, connectorId: number) => Promise<void>;
   initSocket: () => void;
   setError: (error: string | null) => void;
+  setCurrentShift: (shift: any | null) => void;
+  checkShift: (userId: number) => Promise<void>;
+  openShift: (userId: number) => Promise<void>;
+  closeShift: (shiftId: number) => Promise<void>;
 }
 
 const socket = io('http://localhost:3000');
@@ -21,10 +26,45 @@ const socket = io('http://localhost:3000');
 export const useStore = create<AppState>((set, get) => ({
   stations: [],
   activeTransactions: [],
+  currentShift: null,
   isLoading: false,
   error: null,
 
   setError: (error) => set({ error }),
+  setCurrentShift: (shift) => set({ currentShift: shift }),
+
+  checkShift: async (userId) => {
+    try {
+      const shift = await api.getCurrentShift(userId);
+      set({ currentShift: shift });
+      if (shift && shift.status === 'open') {
+        await get().fetchStations();
+      }
+    } catch (error) {
+      console.warn('Ошибка при проверке смены', error);
+    }
+  },
+
+  openShift: async (userId) => {
+    try {
+      const shift = await api.openShift(userId);
+      set({ currentShift: shift });
+      await get().fetchStations();
+    } catch (error: any) {
+      alert(error.message || 'Ошибка открытия смены');
+    }
+  },
+
+  closeShift: async (shiftId: number) => {
+    try {
+      const response = await api.closeShift(shiftId);
+      set({ currentShift: null });
+      return response;
+    } catch (error) {
+      console.error('Ошибка закрытия смены', error);
+      throw error;
+    }
+  },
 
   initSocket: () => {
     socket.off('charging_update');

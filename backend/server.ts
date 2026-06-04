@@ -8,7 +8,9 @@ import shiftRoutes from './api/shifts.routes';
 import transactionRoutes from './api/transactions.routes';
 import stationRoutes from './api/stations.routes';
 import adminRoutes from './api/admin.routes';
-import { setupOcppServer } from './ocpp';
+import settingsRoutes from './api/settings.routes';
+import reportsRoutes from './api/reports.routes';
+import { setupOcppServer, loadGlobalPrice, globalPricePerKwh } from './ocpp';
 
 const app = express();
 const httpServer = createServer(app);
@@ -35,6 +37,20 @@ app.use('/api/shifts', shiftRoutes);
 app.use('/api/transactions', transactionRoutes); 
 app.use('/api/stations', stationRoutes); 
 app.use('/api/admin', adminRoutes); 
+app.use('/api/settings', settingsRoutes); 
+
+// МИДДЛВАР ДЛЯ ЭМУЛЯЦИИ AUTH (Достаем из заголовков)
+const authMiddleware = (req: any, res: any, next: any) => {
+  const userId = req.headers['x-user-id'];
+  const userRole = req.headers['x-user-role'];
+  
+  if (userId) {
+    req.user = { id: parseInt(userId as string), role: userRole };
+  }
+  next();
+};
+
+app.use('/api/reports', authMiddleware, reportsRoutes); 
 
 // --- СИМУЛЯТОР ЗАРЯДКИ (WebSockets) ---
 setInterval(async () => {
@@ -47,7 +63,7 @@ setInterval(async () => {
       // Имитируем потребление: +0.05 кВт за тик (каждые 2 сек)
       const increment = 0.05;
       const newKwh = tx.consumed_kwh + increment;
-      const newAmount = newKwh * KWH_RATE;
+      const newAmount = newKwh * globalPricePerKwh;
 
       // Проверка на автостоп по лимиту (если не "полный бак")
       if (tx.is_full_tank === 0 && newKwh >= tx.target_kwh) {
@@ -55,7 +71,7 @@ setInterval(async () => {
         try {
           await db.run(
             'UPDATE transactions SET consumed_kwh = ?, amount_tjs = ?, status = "completed", finished_at = datetime("now") WHERE id = ?',
-            [tx.target_kwh, tx.target_kwh * KWH_RATE, tx.id]
+            [tx.target_kwh, tx.target_kwh * globalPricePerKwh, tx.id]
           );
           await db.run('UPDATE connectors SET status = "available" WHERE id = ?', [tx.connector_id]);
           await db.run('COMMIT');
@@ -64,7 +80,7 @@ setInterval(async () => {
             transaction_id: tx.id, 
             connector_id: tx.connector_id,
             consumed_kwh: tx.target_kwh, 
-            amount_tjs: tx.target_kwh * KWH_RATE, 
+            amount_tjs: tx.target_kwh * globalPricePerKwh, 
             status: 'completed' 
           });
         } catch (e) {
@@ -92,6 +108,7 @@ setInterval(async () => {
 async function startServer() {
   try {
     await initDB();
+    await loadGlobalPrice();
     httpServer.listen(PORT, () => {
       console.log(`🚀 Сервер и WebSockets запущены на http://localhost:${PORT}`);
     });
