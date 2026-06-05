@@ -81,6 +81,12 @@ export function setupOcppServer(server: HttpServer, io: SocketIOServer) {
               const res = await db.run(`INSERT INTO transactions (connector_id, status, is_full_tank, target_kwh) VALUES (?, 'charging', 1, 999)`, [realDbConnectorId]);
               tx = { id: res.lastID };
               await db.run('UPDATE connectors SET status = "charging" WHERE id = ?', [realDbConnectorId]);
+              
+              // КРИТИЧЕСКИ ВАЖНО ДЛЯ РЕАЛТАЙМА:
+              io.emit('charging_update', {
+                transaction_id: tx.id, connector_id: realDbConnectorId, consumed_kwh: 0, amount_tjs: 0, status: 'charging', soc: 0, price_per_kwh: globalPricePerKwh
+              });
+              io.emit('station_status_update');
             }
             ws.send(JSON.stringify([3, messageId, { transactionId: tx.id, idTagInfo: { status: "Accepted" } }]));
           }

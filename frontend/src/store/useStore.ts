@@ -88,17 +88,14 @@ export const useStore = create<AppState>((set, get) => ({
       set({ pricePerKwh: data.price_per_kwh });
     });
 
-    socket.on('station_status_update', () => {
+    const refreshAll = () => {
+      // fetchStations already internally fetches both stations and activeTransactions
       get().fetchStations();
-    });
+    };
 
-    socket.on('charging_update', () => {
-      get().fetchStations();
-    });
-
-    socket.on('transaction_completed', () => {
-      get().fetchStations();
-    });
+    socket.on('station_status_update', refreshAll);
+    socket.on('charging_update', refreshAll);
+    socket.on('transaction_completed', refreshAll);
   },
 
   fetchStations: async () => {
