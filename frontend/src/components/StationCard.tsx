@@ -18,7 +18,7 @@ const StationCard: React.FC<StationCardProps> = ({ station, activeTransactions, 
 
   return (
     <div className={cn(
-      "bg-rose-50/50 dark:bg-[#1a1c23] border border-rose-100 dark:border-white/5 rounded-[2rem] p-6 shadow-sm transition-all duration-300",
+      "bg-rose-50/50 dark:bg-[#1a1c23] border border-rose-100 dark:border-white/5 rounded-[2rem] p-4 shadow-sm transition-all duration-300",
       isOffline && "opacity-75 grayscale-[0.2]"
     )}>
       <div className="flex justify-between items-start mb-6">
@@ -31,24 +31,12 @@ const StationCard: React.FC<StationCardProps> = ({ station, activeTransactions, 
         </div>
       </div>
 
-      <div className="flex items-center gap-4 mb-6 relative">
-        <div className="h-[1px] flex-1 bg-gradient-to-r from-transparent via-slate-200 dark:via-white/10 to-transparent"></div>
-        <span className="text-xs font-bold uppercase tracking-widest text-slate-500">Статус зарядника</span>
-        <div className="h-[1px] flex-1 bg-gradient-to-r from-transparent via-slate-200 dark:via-white/10 to-transparent"></div>
-      </div>
-
-      <div className="bg-white dark:bg-black/20 rounded-2xl p-4 flex justify-between items-center mb-8 border border-slate-100 dark:border-white/5">
+      <div className="bg-white dark:bg-black/20 rounded-2xl p-4 flex justify-between items-center mb-3 border border-slate-100 dark:border-white/5">
          <div>
            <div className="text-sm text-slate-900 dark:text-white"><span className="text-slate-500">Мощность:</span> <span className="font-black font-mono">160 kW</span></div>
            <div className="text-xs text-slate-500 mt-1">Время в сети: <span className="font-mono">{new Date().toLocaleDateString()}</span></div>
          </div>
          <StatusBadge status={station.status} />
-      </div>
-
-      <div className="flex items-center gap-4 mb-6 relative">
-        <div className="h-[1px] flex-1 bg-gradient-to-r from-transparent via-slate-200 dark:via-white/10 to-transparent"></div>
-        <span className="text-xs font-bold uppercase tracking-widest text-slate-500">Статус коннектора</span>
-        <div className="h-[1px] flex-1 bg-gradient-to-r from-transparent via-slate-200 dark:via-white/10 to-transparent"></div>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
@@ -71,6 +59,23 @@ const ConnectorPanel: React.FC<any> = ({ connector, activeTx, onStart, onStop, i
   const [receipt, setReceipt] = useState<any>(null);
   const [liveTime, setLiveTime] = useState<string>('00:00:00');
   const timerRef = useRef<any>(null);
+
+  const getStatusConfig = (status: string) => {
+    const s = status.toLowerCase();
+    switch (s) {
+      case 'available': return { label: 'Свободен', color: 'text-emerald-500' };
+      case 'preparing': return { label: 'Подготовка', color: 'text-orange-500' };
+      case 'charging': return { label: 'Зарядка', color: 'text-indigo-500' };
+      case 'suspendedev': return { label: 'Пауза (EV)', color: 'text-yellow-500' };
+      case 'suspendedevse': return { label: 'Пауза (Станция)', color: 'text-yellow-500' };
+      case 'finishing': return { label: 'Завершение', color: 'text-blue-500' };
+      case 'reserved': return { label: 'Резерв', color: 'text-purple-500' };
+      case 'faulted': return { label: 'Ошибка', color: 'text-red-500' };
+      default: return { label: 'Недоступен', color: 'text-gray-400' };
+    }
+  };
+
+  const statusConfig = getStatusConfig(connector.status);
 
   // 1. Старт зарядки
   useEffect(() => {
@@ -145,7 +150,7 @@ const ConnectorPanel: React.FC<any> = ({ connector, activeTx, onStart, onStop, i
 
   return (
     <div className={cn(
-      "relative flex flex-col w-full h-[360px] rounded-[1.75rem] p-5 border transition-all duration-300 overflow-hidden",
+      "relative flex flex-col w-full min-h-[220px] h-auto rounded-[1.75rem] p-5 border transition-all duration-300 overflow-hidden",
       uiState === 'charging' 
         ? "bg-indigo-50/90 dark:bg-indigo-950/10 border-indigo-200 dark:border-indigo-500/20 shadow-md" 
         : "bg-white dark:bg-[#1f222b] border-slate-200 dark:border-white/5 shadow-sm"
@@ -177,8 +182,8 @@ const ConnectorPanel: React.FC<any> = ({ connector, activeTx, onStart, onStop, i
               <div className="space-y-2.5 my-auto text-xs shrink-0">
                  <div className="flex justify-between border-b border-slate-100 dark:border-white/5 pb-2">
                    <span className="text-slate-400 font-medium">Статус:</span>
-                   <span className={cn("font-black uppercase tracking-widest text-[10px]", connector.status === 'available' ? "text-emerald-500" : "text-gray-400")}>
-                     {connector.status === 'available' ? 'Свободен' : 'Недоступен'}
+                   <span className={cn("font-black uppercase tracking-widest text-[10px]", statusConfig.color)}>
+                     {statusConfig.label}
                    </span>
                  </div>
                  <div className="flex justify-between border-b border-slate-100 dark:border-white/5 pb-2">

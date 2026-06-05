@@ -5,8 +5,12 @@ import { remoteStart, remoteStop, globalPricePerKwh } from '../ocpp';
 const router = Router();
 
 // 1. Начать зарядку
-router.post('/start', async (req, res) => {
+router.post('/start', async (req: any, res: any) => {
   const { shift_id, connector_id, amount_tjs, is_full_tank } = req.body;
+  
+  if (!is_full_tank && (!amount_tjs || amount_tjs <= 0)) {
+    return res.status(400).json({ error: 'Укажите сумму для зарядки' });
+  }
   
   try {
     const db = await getDB();
@@ -54,6 +58,18 @@ router.post('/start', async (req, res) => {
       }
     } catch (e) { console.error(e) }
 
+    // Отправляем сокеты фронтенду, чтобы он обновился БЕЗ F5
+    req.io.emit('station_status_update');
+    req.io.emit('charging_update', {
+      transaction_id: transactionId,
+      connector_id: connector_id,
+      consumed_kwh: 0,
+      amount_tjs: 0,
+      status: 'charging',
+      soc: 0,
+      price_per_kwh: globalPricePerKwh
+    });
+
     res.json({ transaction_id: transactionId });
   } catch (error) {
     console.error('Error starting transaction:', error);
@@ -64,7 +80,7 @@ router.post('/start', async (req, res) => {
 });
 
 // 2. Остановить зарядку (БРОНЕБОЙНЫЙ МЕТОД)
-router.post('/stop', async (req, res) => {
+router.post('/stop', async (req: any, res: any) => {
   const { transaction_id, connector_id } = req.body;
 
   try {
@@ -73,7 +89,7 @@ router.post('/stop', async (req, res) => {
 
     // ИЩЕМ РЕАЛЬНО АКТИВНУЮ ТРАНЗАКЦИЮ НА ЭТОМ КОННЕКТОРЕ
     const activeTx = await db.get(
-      'SELECT id FROM transactions WHERE connector_id = ? AND status = "charging" ORDER BY id DESC LIMIT 1',
+      'SELECT id, consumed_kwh, amount_tjs FROM transactions WHERE connector_id = ? AND status = "charging" ORDER BY id DESC LIMIT 1',
       [connector_id]
     );
 
@@ -89,6 +105,15 @@ router.post('/stop', async (req, res) => {
     await db.run('UPDATE transactions SET status = "completed", finished_at = datetime("now") WHERE id = ?', [targetTxId]);
     await db.run('UPDATE connectors SET status = "available" WHERE id = ?', [connector_id]);
     await db.run('COMMIT');
+
+    req.io.emit('station_status_update');
+    // Если станция не ответит на RemoteStop, мы все равно должны показать чек кассиру:
+    req.io.emit('transaction_completed', { 
+      transactionId: targetTxId, 
+      connectorId: connector_id,
+      final_kwh: activeTx?.consumed_kwh || 0,
+      final_tjs: activeTx?.amount_tjs || 0
+    });
 
     // Находим серийник станции для OCPP
     const stationData = await db.get(

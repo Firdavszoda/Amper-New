@@ -23,14 +23,16 @@ const AdminDashboard: React.FC = () => {
   const [newUser, setNewUser] = useState({ username: '', password: '', role: 'cashier' });
   const [loading, setLoading] = useState(true);
   const [price, setPrice] = useState<number | string>('');
+  const [reserve, setReserve] = useState<number | string>('');
   const [isSavingPrice, setIsSavingPrice] = useState(false);
 
   const fetchPrice = async () => {
     try {
-      const data = await api.getPrice();
+      const data = await api.getSettings();
       setPrice(data.price_per_kwh);
+      setReserve(data.stop_reserve_wh);
     } catch (e) {
-      console.error("Ошибка загрузки тарифа:", e);
+      console.error("Ошибка загрузки настроек:", e);
     }
   };
 
@@ -38,7 +40,7 @@ const AdminDashboard: React.FC = () => {
     try {
       const [userData, analyticsData] = await Promise.all([
         api.getUsers(),
-        api.getAnalytics({})
+        api.getAnalytics()
       ]);
       setUsers(userData);
       setAnalytics(analyticsData);
@@ -47,13 +49,16 @@ const AdminDashboard: React.FC = () => {
     }
   };
 
-  const handleSavePrice = async () => {
+  const handleSaveSettings = async () => {
     setIsSavingPrice(true);
     try {
-      await api.updatePrice(parseFloat(price as string));
-      alert('Тариф успешно обновлен во всей системе!');
+      await Promise.all([
+        api.updatePrice(parseFloat(price as string)),
+        api.updateReserve(parseFloat(reserve as string))
+      ]);
+      alert('Настройки успешно обновлены во всей системе!');
     } catch (e) {
-      alert('Ошибка при сохранении тарифа');
+      alert('Ошибка при сохранении настроек');
     } finally {
       setIsSavingPrice(false);
     }
@@ -101,34 +106,50 @@ const AdminDashboard: React.FC = () => {
   const renderOverview = () => (
     <div className="space-y-10 animate-in fade-in slide-in-from-right-8 duration-500 text-left">
       
-      {/* УПРАВЛЕНИЕ ТАРИФОМ */}
+      {/* УПРАВЛЕНИЕ ТАРИФОМ И РЕЗЕРВОМ */}
       <div className="bg-white dark:bg-app-card border border-slate-200 dark:border-app-border p-8 rounded-[2.5rem] shadow-sm dark:shadow-xl">
-        <div className="flex flex-col md:flex-row justify-between items-center gap-6">
-          <div className="text-left">
-            <h3 className="text-lg font-black text-slate-900 dark:text-white uppercase tracking-tighter flex items-center gap-2">
-              <Zap className="w-5 h-5 text-emerald-500" /> Управление тарифом
-            </h3>
-            <p className="text-[10px] text-slate-500 dark:text-app-muted font-bold uppercase tracking-widest mt-1">Стоимость электроэнергии для клиентов</p>
-          </div>
-          
-          <div className="flex items-center gap-4 w-full md:w-auto">
-            <div className="relative flex-1 md:w-48">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-10">
+          <div className="flex flex-col justify-between items-start gap-6">
+            <div className="text-left">
+              <h3 className="text-lg font-black text-slate-900 dark:text-white uppercase tracking-tighter flex items-center gap-2">
+                <Zap className="w-5 h-5 text-emerald-500" /> Тариф (TJS/кВт⋅ч)
+              </h3>
+              <p className="text-[10px] text-slate-500 dark:text-app-muted font-bold uppercase tracking-widest mt-1 text-left">Стоимость электроэнергии для клиентов</p>
+            </div>
+            <div className="w-full relative">
               <input 
                 type="number" step="0.1"
                 value={price}
                 onChange={(e) => setPrice(e.target.value)}
-                className="w-full bg-slate-50 dark:bg-app-bg border border-slate-200 dark:border-app-border rounded-2xl px-6 py-4 text-slate-900 dark:text-white font-black text-xl focus:outline-none focus:ring-4 focus:ring-emerald-500/10 focus:border-emerald-500 transition-all"
+                className="w-full bg-slate-50 dark:bg-app-bg border border-slate-200 dark:border-app-border rounded-2xl px-6 py-4 text-slate-900 dark:text-white font-black text-xl focus:outline-none focus:border-emerald-500 transition-all"
               />
-              <span className="absolute right-6 top-5 text-[10px] font-black text-slate-400 dark:text-gray-400 uppercase tracking-widest">TJS/кВт⋅ч</span>
             </div>
-            <button 
-              onClick={handleSavePrice} disabled={isSavingPrice}
-              className="bg-emerald-500 hover:bg-emerald-600 text-white px-10 py-5 rounded-2xl font-black text-xs uppercase tracking-widest transition-all shadow-xl shadow-emerald-500/20 active:scale-95 disabled:opacity-50"
-            >
-              {isSavingPrice ? '...' : 'Обновить'}
-            </button>
+          </div>
+
+          <div className="flex flex-col justify-between items-start gap-6">
+            <div className="text-left">
+              <h3 className="text-lg font-black text-slate-900 dark:text-white uppercase tracking-tighter flex items-center gap-2">
+                <ShieldCheck className="w-5 h-5 text-blue-500" /> Глобальный резерв (Wh)
+              </h3>
+              <p className="text-[10px] text-slate-500 dark:text-app-muted font-bold uppercase tracking-widest mt-1 text-left">Остановка за Х Ватт-час до лимита</p>
+            </div>
+            <div className="w-full relative">
+              <input 
+                type="number" step="1"
+                value={reserve}
+                onChange={(e) => setReserve(e.target.value)}
+                className="w-full bg-slate-50 dark:bg-app-bg border border-slate-200 dark:border-app-border rounded-2xl px-6 py-4 text-slate-900 dark:text-white font-black text-xl focus:outline-none focus:border-blue-500 transition-all"
+              />
+            </div>
           </div>
         </div>
+
+        <button 
+          onClick={handleSaveSettings} disabled={isSavingPrice}
+          className="w-full mt-10 bg-slate-900 dark:bg-white/10 hover:bg-slate-800 dark:hover:bg-white/20 text-white py-5 rounded-2xl font-black text-xs uppercase tracking-widest transition-all shadow-xl active:scale-95 disabled:opacity-50"
+        >
+          {isSavingPrice ? 'Сохранение...' : 'Сохранить глобальные настройки'}
+        </button>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-8 text-left">

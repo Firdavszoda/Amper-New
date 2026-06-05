@@ -80,7 +80,10 @@ export const useStore = create<AppState>((set, get) => ({
     socket.off('charging_update');
     socket.off('station_status_update');
     socket.off('price_updated');
+    socket.off('transaction_completed');
     
+    socket.on('connect', () => console.log('Socket connected'));
+
     socket.on('price_updated', (data) => {
       set({ pricePerKwh: data.price_per_kwh });
     });
@@ -89,54 +92,12 @@ export const useStore = create<AppState>((set, get) => ({
       get().fetchStations();
     });
 
-    socket.on('charging_update', (data) => {
-      const { transaction_id, connector_id, consumed_kwh, amount_tjs, status, soc, price_per_kwh } = data;
+    socket.on('charging_update', () => {
+      get().fetchStations();
+    });
 
-      if (status === 'completed') {
-        set((state) => ({
-          stations: state.stations.map(s => ({
-            ...s,
-            connectors: s.connectors.map(c => 
-              c.id === connector_id ? { ...c, status: 'available' } : c
-            )
-          })),
-          activeTransactions: state.activeTransactions.filter(t => t.id !== transaction_id)
-        }));
-      } else {
-        set((state) => {
-          const exists = state.activeTransactions.find(t => t.id === transaction_id);
-          if (exists) {
-            return {
-              activeTransactions: state.activeTransactions.map(t => 
-                t.id === transaction_id ? { 
-                  ...t, 
-                  consumed_kwh, 
-                  amount_tjs,
-                  soc,
-                  price_per_kwh 
-                } : t
-              )
-            };
-          } else {
-            // Если транзакции нет в списке (запуск со станции), добавляем её
-            return {
-              activeTransactions: [
-                ...state.activeTransactions,
-                {
-                  id: transaction_id,
-                  connector_id,
-                  consumed_kwh,
-                  amount_tjs,
-                  soc,
-                  price_per_kwh,
-                  is_full_tank: true,
-                  start_time: new Date().toISOString()
-                }
-              ]
-            };
-          }
-        });
-      }
+    socket.on('transaction_completed', () => {
+      get().fetchStations();
     });
   },
 

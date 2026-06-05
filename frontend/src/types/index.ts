@@ -12,7 +12,7 @@ export interface Connector {
   name: string;
   type: string;
   max_power_kw: number;
-  status: 'available' | 'charging' | 'faulted';
+  status: string;
 }
 
 export interface Station {
