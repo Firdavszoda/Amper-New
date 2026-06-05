@@ -259,20 +259,19 @@ const ConnectorPanel: React.FC<any> = ({ connector, activeTx, onStart, onStop, i
             Время: <span className="font-mono tabular-nums text-sm text-slate-900 dark:text-white ml-1">{liveTime}</span>
           </div>
 
-          <div className="flex justify-between items-center bg-slate-50 dark:bg-black/20 border border-slate-100 dark:border-white/5 rounded-xl p-3 mt-auto shrink-0 mb-1">
-            <div className="flex flex-col items-center flex-1">
-              <span className="text-[9px] text-slate-400 font-bold uppercase tracking-widest mb-0.5">Энергия</span>
-              <div className="text-sm font-black text-emerald-500 font-mono">{(activeTx.consumed_kwh || 0).toFixed(2)} <span className="text-[8px] font-medium text-slate-400 uppercase">kWh</span></div>
+          {/* ИДЕАЛЬНЫЙ БЛОК МЕТРИК */}
+          <div className="grid grid-cols-3 gap-1 bg-slate-50 dark:bg-black/20 border border-slate-100 dark:border-white/5 rounded-xl p-3 mt-auto shrink-0 mb-1 divide-x divide-slate-200 dark:divide-white/10">
+            <div className="flex flex-col items-center justify-center">
+              <span className="text-[8px] text-slate-400 font-bold uppercase tracking-widest mb-1">Энергия</span>
+              <div className="text-xs font-black text-emerald-500 font-mono tabular-nums">{(activeTx.consumed_kwh || 0).toFixed(2)} <span className="text-[7px] text-slate-400 font-normal ml-0.5">kWh</span></div>
             </div>
-            <div className="w-[1px] h-8 bg-slate-200 dark:bg-white/10"></div>
-            <div className="flex flex-col items-center flex-1">
-              <span className="text-[9px] text-slate-400 font-bold uppercase tracking-widest mb-0.5">Сумма</span>
-              <div className="text-sm font-black text-slate-900 dark:text-white font-mono">{(activeTx.amount_tjs || 0).toFixed(2)} <span className="text-[8px] font-medium text-slate-400 uppercase">TJS</span></div>
+            <div className="flex flex-col items-center justify-center pl-1">
+              <span className="text-[8px] text-slate-400 font-bold uppercase tracking-widest mb-1">Сумма</span>
+              <div className="text-xs font-black text-slate-900 dark:text-white font-mono tabular-nums">{(activeTx.amount_tjs || 0).toFixed(2)} <span className="text-[7px] text-slate-400 font-normal ml-0.5">TJS</span></div>
             </div>
-            <div className="w-[1px] h-8 bg-slate-200 dark:bg-white/10"></div>
-            <div className="flex flex-col items-center flex-1">
-              <span className="text-[9px] text-slate-400 font-bold uppercase tracking-widest mb-0.5">Тариф</span>
-              <div className="text-sm font-black text-indigo-500 font-mono">{(activeTx.price_per_kwh || pricePerKwh).toFixed(1)} <span className="text-[8px] font-medium text-slate-400 uppercase">TJS</span></div>
+            <div className="flex flex-col items-center justify-center pl-1">
+              <span className="text-[8px] text-slate-400 font-bold uppercase tracking-widest mb-1">Тариф</span>
+              <div className="text-xs font-black text-indigo-500 font-mono tabular-nums">{(activeTx.price_per_kwh || pricePerKwh).toFixed(1)} <span className="text-[7px] text-slate-400 font-normal ml-0.5">TJS</span></div>
             </div>
           </div>
         </div>

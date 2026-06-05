@@ -110,10 +110,13 @@ export function setupOcppServer(server: HttpServer, io: SocketIOServer) {
                 for (const mv of meterValues.filter(Boolean)) {
                   const sampled = Array.isArray(mv.sampledValue) ? mv.sampledValue : [mv.sampledValue];
                   for (const sv of sampled.filter(Boolean)) {
-                    if (!sv.measurand || sv.measurand === 'Energy.Active.Import.Register') {
-                      realKwh = Number(sv.value) / 1000;
+                    const measurand = sv.measurand || 'Energy.Active.Import.Register';
+                    if (measurand === 'Energy.Active.Import.Register') {
+                      realKwh = (Number(sv.value) || 0) / 1000; 
                     }
-                    if (sv.measurand === 'SoC') currentSoc = Number(sv.value);
+                    if (measurand === 'SoC' || measurand === 'StateOfCharge') {
+                      currentSoc = Number(sv.value) || 0;
+                    }
                   }
                 }
 
