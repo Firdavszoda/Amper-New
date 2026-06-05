@@ -13,6 +13,21 @@ interface StationCardProps {
   onStopCharging: (transactionId: number, connectorId: number) => void;
 }
 
+const getStatusConfig = (status: string) => {
+  const s = status.toLowerCase();
+  switch (s) {
+    case 'available': return { label: 'Свободен', color: 'text-emerald-500' };
+    case 'preparing': return { label: 'Подготовка', color: 'text-orange-500' };
+    case 'charging': return { label: 'Зарядка', color: 'text-indigo-500' };
+    case 'suspendedev': return { label: 'Пауза (EV)', color: 'text-yellow-500' };
+    case 'suspendedevse': return { label: 'Пауза (Станция)', color: 'text-yellow-500' };
+    case 'finishing': return { label: 'Завершение', color: 'text-blue-500' };
+    case 'reserved': return { label: 'Резерв', color: 'text-purple-500' };
+    case 'faulted': return { label: 'Ошибка', color: 'text-red-500' };
+    default: return { label: 'Недоступен', color: 'text-gray-400' };
+  }
+};
+
 const StationCard: React.FC<StationCardProps> = ({ station, activeTransactions, onStartCharging, onStopCharging }) => {
   const isOffline = station.status === 'offline' || station.status === 'faulted';
 
@@ -26,9 +41,7 @@ const StationCard: React.FC<StationCardProps> = ({ station, activeTransactions, 
           <h2 className="text-2xl font-black text-indigo-700 dark:text-indigo-400 uppercase tracking-tight">{station.name}</h2>
           <p className="text-xs font-mono text-slate-500 dark:text-gray-500 mt-1">{station.serial_number}</p>
         </div>
-        <div className="flex gap-2">
-           <button className="w-8 h-8 rounded-full bg-black/5 flex items-center justify-center text-slate-400 hover:text-slate-600 transition-colors">⟳</button>
-        </div>
+        <button className="w-8 h-8 rounded-full bg-black/5 flex items-center justify-center text-slate-400 hover:text-slate-600 transition-colors">⟳</button>
       </div>
 
       <div className="bg-white dark:bg-black/20 rounded-2xl p-4 flex justify-between items-center mb-3 border border-slate-100 dark:border-white/5">
@@ -48,8 +61,6 @@ const StationCard: React.FC<StationCardProps> = ({ station, activeTransactions, 
   );
 };
 
-/* --- CONNECTOR PANEL (STATE MACHINE) --- */
-
 type UIState = 'idle' | 'starting' | 'charging' | 'finished';
 
 const ConnectorPanel: React.FC<any> = ({ connector, activeTx, onStart, onStop, isStationOffline }) => {
@@ -59,36 +70,27 @@ const ConnectorPanel: React.FC<any> = ({ connector, activeTx, onStart, onStop, i
   const [receipt, setReceipt] = useState<any>(null);
   const [liveTime, setLiveTime] = useState<string>('00:00:00');
   const timerRef = useRef<any>(null);
-
-  const getStatusConfig = (status: string) => {
-    const s = status.toLowerCase();
-    switch (s) {
-      case 'available': return { label: 'Свободен', color: 'text-emerald-500' };
-      case 'preparing': return { label: 'Подготовка', color: 'text-orange-500' };
-      case 'charging': return { label: 'Зарядка', color: 'text-indigo-500' };
-      case 'suspendedev': return { label: 'Пауза (EV)', color: 'text-yellow-500' };
-      case 'suspendedevse': return { label: 'Пауза (Станция)', color: 'text-yellow-500' };
-      case 'finishing': return { label: 'Завершение', color: 'text-blue-500' };
-      case 'reserved': return { label: 'Резерв', color: 'text-purple-500' };
-      case 'faulted': return { label: 'Ошибка', color: 'text-red-500' };
-      default: return { label: 'Недоступен', color: 'text-gray-400' };
-    }
-  };
-
   const statusConfig = getStatusConfig(connector.status);
 
-  // 1. Старт зарядки
+  // 1. Бронебойный стейт: НИКОГДА не сбрасывать чек автоматически
   useEffect(() => {
-    if (activeTx && uiState !== 'charging' && uiState !== 'finished') {
-      setUiState('charging');
-      setReceipt(null);
-    }
-  }, [activeTx, uiState]);
+    if (uiState === 'finished') return; 
 
-  // 2. Ловим итоговый чек по сокету (ЖЕЛЕЗОБЕТОННО)
+    if (activeTx) {
+      if (uiState !== 'charging') setUiState('charging');
+      if (receipt === 'full_tank_confirm') setReceipt(null);
+    } else if (!activeTx && uiState === 'charging') {
+      const timer = setTimeout(() => {
+        if (uiState === 'charging') setUiState('idle');
+      }, 3000);
+      return () => clearTimeout(timer);
+    }
+  }, [activeTx, uiState, receipt]);
+
+  // 2. Ловим итоговый чек
   useEffect(() => {
     const handleCompleted = (data: any) => {
-      if (connector.id === data.connectorId) {
+      if (data.connectorId === connector.id) {
         setReceipt({ kwh: data.final_kwh, tjs: data.final_tjs });
         setUiState('finished');
       }
@@ -97,27 +99,13 @@ const ConnectorPanel: React.FC<any> = ({ connector, activeTx, onStart, onStop, i
     return () => { socket.off('transaction_completed', handleCompleted); };
   }, [connector.id]);
 
-  // 3. Сброс, если транзакция зависла (защита от багов)
-  useEffect(() => {
-    let timeout: any;
-    if (!activeTx && uiState === 'charging') {
-      timeout = setTimeout(() => {
-        setUiState(prev => prev === 'charging' ? 'idle' : prev);
-      }, 4000);
-    }
-    return () => clearTimeout(timeout);
-  }, [activeTx, uiState]);
-
-  // 4. Живой таймер (Фикс часовых поясов UTC+5)
+  // 3. Живой таймер UTC+5
   useEffect(() => {
     if (uiState === 'charging' && activeTx?.start_time) {
-      // Гарантируем, что время читается как UTC, добавляя 'Z', если его нет
       const dbTime = activeTx.start_time.endsWith('Z') ? activeTx.start_time : activeTx.start_time + 'Z';
       const start = new Date(dbTime).getTime();
-      
       timerRef.current = setInterval(() => {
-        const now = new Date().getTime();
-        const diff = Math.max(0, now - start);
+        const diff = Math.max(0, new Date().getTime() - start);
         const h = Math.floor(diff / 3600000).toString().padStart(2, '0');
         const m = Math.floor((diff % 3600000) / 60000).toString().padStart(2, '0');
         const s = Math.floor((diff % 60000) / 1000).toString().padStart(2, '0');
@@ -125,29 +113,15 @@ const ConnectorPanel: React.FC<any> = ({ connector, activeTx, onStart, onStop, i
       }, 1000);
     } else {
       clearInterval(timerRef.current);
-      if (liveTime !== '00:00:00') {
-        const timer = setTimeout(() => setLiveTime('00:00:00'), 0);
-        return () => clearTimeout(timer);
-      }
+      setLiveTime('00:00:00');
     }
     return () => clearInterval(timerRef.current);
-  }, [uiState, activeTx, liveTime]);
+  }, [uiState, activeTx]);
 
   const handleStartClick = (isFull: boolean) => {
     if (isStationOffline) return;
     setUiState('starting');
     onStart(connector.id, Number(amount) || 0, isFull);
-    setAmount('');
-  };
-
-  const handleStopClick = () => {
-    if (!activeTx) return;
-    onStop(activeTx.id, connector.id);
-  };
-
-  const closeReceipt = () => {
-    setUiState('idle');
-    setReceipt(null);
     setAmount('');
   };
 
@@ -158,8 +132,6 @@ const ConnectorPanel: React.FC<any> = ({ connector, activeTx, onStart, onStop, i
         ? "bg-indigo-50/90 dark:bg-indigo-950/10 border-indigo-200 dark:border-indigo-500/20 shadow-md" 
         : "bg-white dark:bg-[#1f222b] border-slate-200 dark:border-white/5 shadow-sm"
     )}>
-      
-      {/* ИНФОРМАЦИОННАЯ ШАПКА */}
       <div className="flex flex-col items-center text-center w-full mb-3 shrink-0">
         <div className="flex items-center gap-2">
           {uiState === 'charging' && <span className="text-indigo-500 animate-pulse text-xs">⚡</span>}
@@ -168,7 +140,6 @@ const ConnectorPanel: React.FC<any> = ({ connector, activeTx, onStart, onStop, i
         <p className="text-[9px] text-slate-400 font-mono tracking-widest mt-0.5">{connector.type.replace(/_/g, ' ')}</p>
       </div>
 
-      {/* СОСТОЯНИЕ 1: IDLE */}
       {uiState === 'idle' && (
         <div className="flex flex-col flex-1 animate-in fade-in h-full">
           {receipt === 'full_tank_confirm' ? (
@@ -185,9 +156,7 @@ const ConnectorPanel: React.FC<any> = ({ connector, activeTx, onStart, onStop, i
               <div className="space-y-2.5 my-auto text-xs shrink-0">
                  <div className="flex justify-between border-b border-slate-100 dark:border-white/5 pb-2">
                    <span className="text-slate-400 font-medium">Статус:</span>
-                   <span className={cn("font-black uppercase tracking-widest text-[10px]", statusConfig.color)}>
-                     {statusConfig.label}
-                   </span>
+                   <span className={cn("font-black uppercase tracking-widest text-[10px]", statusConfig.color)}>{statusConfig.label}</span>
                  </div>
                  <div className="flex justify-between border-b border-slate-100 dark:border-white/5 pb-2">
                    <span className="text-slate-400 font-medium">Мощность:</span>
@@ -210,23 +179,13 @@ const ConnectorPanel: React.FC<any> = ({ connector, activeTx, onStart, onStop, i
                 
                 <div className="flex gap-1.5 mt-2">
                    {[10, 20, 50, 100].map(val => (
-                     <button 
-                       key={val} 
-                       onClick={() => setAmount(val.toString())} 
-                       className="flex-1 py-1.5 bg-slate-100 dark:bg-white/5 hover:bg-slate-200 dark:hover:bg-white/10 rounded-lg text-[10px] font-bold text-slate-600 dark:text-gray-300 transition-colors disabled:opacity-50"
-                     >
-                       {val}
-                     </button>
+                     <button key={val} onClick={() => setAmount(val.toString())} className="flex-1 py-1.5 bg-slate-100 dark:bg-white/5 hover:bg-slate-200 dark:hover:bg-white/10 rounded-lg text-[10px] font-bold text-slate-600 dark:text-gray-300 transition-colors disabled:opacity-50">{val}</button>
                    ))}
                 </div>
 
                 <div className="flex gap-2 mt-2">
-                  <button onClick={() => handleStartClick(false)} disabled={!amount || connector.status !== 'available'} className="flex-1 bg-emerald-500 hover:bg-emerald-600 disabled:bg-slate-100 dark:disabled:bg-white/5 text-white disabled:text-slate-400 py-2.5 rounded-xl font-bold uppercase tracking-widest text-[10px] transition-all active:scale-95 shadow-sm">
-                    Запустить
-                  </button>
-                  <button onClick={() => setReceipt('full_tank_confirm')} disabled={connector.status !== 'available'} className="flex-1 bg-blue-500 hover:bg-blue-600 disabled:bg-slate-100 dark:disabled:bg-white/5 text-white disabled:text-slate-400 py-2.5 rounded-xl font-bold uppercase tracking-widest text-[10px] transition-all active:scale-95 shadow-sm">
-                    Полный бак
-                  </button>
+                  <button onClick={() => handleStartClick(false)} disabled={!amount || connector.status !== 'available'} className="flex-1 bg-emerald-500 hover:bg-emerald-600 disabled:bg-slate-100 dark:disabled:bg-white/5 text-white disabled:text-slate-400 py-2.5 rounded-xl font-bold uppercase tracking-widest text-[10px] transition-all active:scale-95 shadow-sm">Запустить</button>
+                  <button onClick={() => setReceipt('full_tank_confirm')} disabled={connector.status !== 'available'} className="flex-1 bg-blue-500 hover:bg-blue-600 disabled:bg-slate-100 dark:disabled:bg-white/5 text-white disabled:text-slate-400 py-2.5 rounded-xl font-bold uppercase tracking-widest text-[10px] transition-all active:scale-95 shadow-sm">Полный бак</button>
                 </div>
               </div>
             </>
@@ -234,7 +193,6 @@ const ConnectorPanel: React.FC<any> = ({ connector, activeTx, onStart, onStop, i
         </div>
       )}
 
-      {/* СОСТОЯНИЕ 2: STARTING */}
       {uiState === 'starting' && (
         <div className="flex flex-col items-center justify-center h-full animate-in fade-in zoom-in duration-300 flex-1 bg-indigo-50/50 dark:bg-indigo-900/10 rounded-2xl border border-indigo-100 dark:border-indigo-500/20">
           <Zap className="w-8 h-8 text-indigo-500 animate-bounce mb-3" />
@@ -242,7 +200,6 @@ const ConnectorPanel: React.FC<any> = ({ connector, activeTx, onStart, onStop, i
         </div>
       )}
 
-      {/* СОСТОЯНИЕ 3: CHARGING */}
       {uiState === 'charging' && activeTx && (
         <div className="flex flex-col flex-1 animate-in fade-in h-full justify-between">
           <div className="flex justify-center items-center relative h-24 my-auto shrink-0">
@@ -250,7 +207,7 @@ const ConnectorPanel: React.FC<any> = ({ connector, activeTx, onStart, onStop, i
               <div className="text-lg font-black text-indigo-600 dark:text-indigo-400 font-mono tabular-nums">{activeTx.soc || 0}%</div>
               <div className="text-[7px] text-slate-400 font-black uppercase tracking-widest">SOC</div>
             </div>
-            <button onClick={handleStopClick} className="absolute right-4 bottom-0 w-11 h-11 bg-white dark:bg-[#1a1c23] border border-slate-200 dark:border-white/10 rounded-full flex items-center justify-center text-slate-700 dark:text-white hover:text-red-500 dark:hover:text-red-400 transition-all shadow-md active:scale-90">
+            <button onClick={() => onStop(activeTx.id, connector.id)} className="absolute right-4 bottom-0 w-11 h-11 bg-white dark:bg-[#1a1c23] border border-slate-200 dark:border-white/10 rounded-full flex items-center justify-center text-slate-700 dark:text-white hover:text-red-500 dark:hover:text-red-400 transition-all shadow-md active:scale-90">
               <Square className="w-4 h-4" fill="currentColor" />
             </button>
           </div>
@@ -259,7 +216,6 @@ const ConnectorPanel: React.FC<any> = ({ connector, activeTx, onStart, onStop, i
             Время: <span className="font-mono tabular-nums text-sm text-slate-900 dark:text-white ml-1">{liveTime}</span>
           </div>
 
-          {/* ИДЕАЛЬНЫЙ БЛОК МЕТРИК */}
           <div className="grid grid-cols-3 gap-1 bg-slate-50 dark:bg-black/20 border border-slate-100 dark:border-white/5 rounded-xl p-3 mt-auto shrink-0 mb-1 divide-x divide-slate-200 dark:divide-white/10">
             <div className="flex flex-col items-center justify-center">
               <span className="text-[8px] text-slate-400 font-bold uppercase tracking-widest mb-1">Энергия</span>
@@ -277,7 +233,6 @@ const ConnectorPanel: React.FC<any> = ({ connector, activeTx, onStart, onStop, i
         </div>
       )}
 
-      {/* СОСТОЯНИЕ 4: FINISHED (ЧЕК) */}
       {uiState === 'finished' && receipt && typeof receipt !== 'string' && (
         <div className="flex flex-col flex-1 animate-in zoom-in-95 fade-in duration-300 h-full justify-between pb-1">
           <div className="flex-1 flex flex-col items-center justify-center">
@@ -298,7 +253,7 @@ const ConnectorPanel: React.FC<any> = ({ connector, activeTx, onStart, onStop, i
             </div>
           </div>
           
-          <button onClick={closeReceipt} className="w-full mt-3 shrink-0 bg-slate-200 hover:bg-slate-300 dark:bg-white/10 dark:hover:bg-white/20 text-slate-900 dark:text-white py-3 rounded-xl font-black uppercase tracking-widest text-[10px] flex items-center justify-center gap-2 transition-all active:scale-95">
+          <button onClick={() => { setUiState('idle'); setReceipt(null); setAmount(''); }} className="w-full mt-3 shrink-0 bg-slate-200 hover:bg-slate-300 dark:bg-white/10 dark:hover:bg-white/20 text-slate-900 dark:text-white py-3 rounded-xl font-black uppercase tracking-widest text-[10px] flex items-center justify-center gap-2 transition-all active:scale-95">
             <X className="w-4 h-4" /> Закрыть чек
           </button>
         </div>

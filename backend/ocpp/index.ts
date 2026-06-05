@@ -3,7 +3,6 @@ import { Server as HttpServer } from 'http';
 import { Server as SocketIOServer } from 'socket.io';
 import { getDB } from '../database/db'; 
 
-export const chargingSpeeds = new Map<number, { lastWh: number }>();
 export const activeConnections = new Map<string, WebSocket>();
 export let globalPricePerKwh = 3.6;
 export let globalReserveWh = 50; 
@@ -37,14 +36,10 @@ export function setupOcppServer(server: HttpServer, io: SocketIOServer) {
 
     try {
       const db = await getDB();
-      // Ставим станцию в online
       await db.run('UPDATE stations SET status = "online" WHERE serial_number = ?', [stationId]);
-      // Разблокируем ручки
       await db.run('UPDATE connectors SET status = "available" WHERE station_id = (SELECT id FROM stations WHERE serial_number = ?)', [stationId]);
-      
-      console.log(`📡 Станция ${stationId} В СЕТИ. Отправляю апдейт на фронт.`);
-      io.emit('station_status_update'); // <-- КРИТИЧЕСКИ ВАЖНО ДЛЯ РЕАЛТАЙМА
-    } catch (e) { console.error('Ошибка ONLINE:', e); }
+      io.emit('station_status_update');
+    } catch(e) {}
 
     ws.on('message', async (message: string) => {
       try {
@@ -52,28 +47,28 @@ export function setupOcppServer(server: HttpServer, io: SocketIOServer) {
         if (Array.isArray(parsed) && parsed[0] === 2) {
           const [messageTypeId, messageId, action, payload] = parsed;
 
+          if (action === 'BootNotification' || action === 'Heartbeat') {
+            ws.send(JSON.stringify([3, messageId, { status: 'Accepted', currentTime: new Date().toISOString(), interval: 300 }]));
+          }
+
           if (action === 'StatusNotification') {
-            const { connectorId, status } = payload;
-            ws.send(JSON.stringify([3, messageId, {}])); 
+            ws.send(JSON.stringify([3, messageId, {}]));
             try {
               const db = await getDB();
               const station = await db.get('SELECT id FROM stations WHERE serial_number = ?', [stationId]);
               if (station) {
-                const exactStatus = status.toLowerCase(); 
-                await db.run('UPDATE connectors SET status = ? WHERE station_id = ? AND name LIKE ?', [exactStatus, station.id, `%${connectorId}%`]);
+                const exactStatus = payload.status.toLowerCase();
+                await db.run('UPDATE connectors SET status = ? WHERE station_id = ? AND name LIKE ?', [exactStatus, station.id, `%${payload.connectorId}%`]);
                 io.emit('station_status_update');
               }
-            } catch (e) { console.error('Ошибка БД в StatusNotification:', e); }
+            } catch (e) {}
           }
 
           if (action === 'StartTransaction') {
             const db = await getDB();
-            const { connectorId } = payload;
-            
-            // Находим реальный DB ID
             const station = await db.get('SELECT id FROM stations WHERE serial_number = ?', [stationId]);
-            const dbConn = await db.get('SELECT id FROM connectors WHERE station_id = ? AND name LIKE ?', [station.id, `%${connectorId}%`]);
-            const realDbConnectorId = dbConn?.id || connectorId;
+            const dbConn = await db.get('SELECT id FROM connectors WHERE station_id = ? AND name LIKE ?', [station.id, `%${payload.connectorId}%`]);
+            const realDbConnectorId = dbConn?.id || payload.connectorId;
 
             let tx = await db.get('SELECT id FROM transactions WHERE connector_id = ? AND status = "charging"', [realDbConnectorId]);
 
@@ -81,11 +76,7 @@ export function setupOcppServer(server: HttpServer, io: SocketIOServer) {
               const res = await db.run(`INSERT INTO transactions (connector_id, status, is_full_tank, target_kwh) VALUES (?, 'charging', 1, 999)`, [realDbConnectorId]);
               tx = { id: res.lastID };
               await db.run('UPDATE connectors SET status = "charging" WHERE id = ?', [realDbConnectorId]);
-              
-              // КРИТИЧЕСКИ ВАЖНО ДЛЯ РЕАЛТАЙМА:
-              io.emit('charging_update', {
-                transaction_id: tx.id, connector_id: realDbConnectorId, consumed_kwh: 0, amount_tjs: 0, status: 'charging', soc: 0, price_per_kwh: globalPricePerKwh
-              });
+              io.emit('charging_update', { transaction_id: tx.id, connector_id: realDbConnectorId, consumed_kwh: 0, amount_tjs: 0, status: 'charging', soc: 0, price_per_kwh: globalPricePerKwh });
               io.emit('station_status_update');
             }
             ws.send(JSON.stringify([3, messageId, { transactionId: tx.id, idTagInfo: { status: "Accepted" } }]));
@@ -93,44 +84,40 @@ export function setupOcppServer(server: HttpServer, io: SocketIOServer) {
 
           if (action === 'MeterValues') {
             ws.send(JSON.stringify([3, messageId, {}]));
-            
-            // ДИАГНОСТИКА: Увидишь в консоли, что присылает симулятор
-            // console.log("DEBUG PAYLOAD:", JSON.stringify(payload, null, 2));
-
             try {
               const db = await getDB();
               const tx = await db.get('SELECT * FROM transactions WHERE id = ?', [payload.transactionId]);
               
-              if (tx) {
+              if (tx && tx.status === 'charging') {
                 let realKwh = tx.consumed_kwh || 0;
                 let currentSoc = 0;
 
-                // Универсальный парсинг для любого симулятора
-                const meterValues = Array.isArray(payload.meterValue) ? payload.meterValue : [payload.meterValue];
-                for (const mv of meterValues.filter(Boolean)) {
-                  const sampled = Array.isArray(mv.sampledValue) ? mv.sampledValue : [mv.sampledValue];
-                  for (const sv of sampled.filter(Boolean)) {
-                    const measurand = sv.measurand || 'Energy.Active.Import.Register';
-                    if (measurand === 'Energy.Active.Import.Register') {
-                      realKwh = (Number(sv.value) || 0) / 1000; 
-                    }
-                    if (measurand === 'SoC' || measurand === 'StateOfCharge') {
-                      currentSoc = Number(sv.value) || 0;
-                    }
+                // Бронебойный рекурсивный поиск любых значений в любой структуре OCPP
+                const searchValues = (obj: any) => {
+                  if (!obj || typeof obj !== 'object') return;
+                  if (obj.value !== undefined) {
+                    const m = (obj.measurand || 'energy.active.import.register').toLowerCase();
+                    if (m === 'energy.active.import.register') realKwh = Number(obj.value) / 1000;
+                    if (m === 'soc' || m === 'stateofcharge') currentSoc = Math.round(Number(obj.value));
                   }
-                }
+                  Object.values(obj).forEach(searchValues);
+                };
+                searchValues(payload);
 
-                // Логика с резервом
+                const newAmount = realKwh * globalPricePerKwh;
                 const projectedKwh = realKwh + (globalReserveWh / 1000);
 
                 if (tx.is_full_tank === 0 && projectedKwh >= tx.target_kwh) {
-                  ws.send(JSON.stringify([2, Math.random().toString(36).substring(2), "RemoteStopTransaction", { transactionId: tx.id }]));
+                  // АВТОСТОП
                   await db.run('UPDATE transactions SET status = "completed", stop_time = CURRENT_TIMESTAMP WHERE id = ?', [tx.id]);
                   await db.run('UPDATE connectors SET status = "available" WHERE id = ?', [tx.connector_id]);
-                  io.emit('transaction_completed', { transactionId: tx.id, connectorId: tx.connector_id, final_kwh: realKwh, final_tjs: realKwh * globalPricePerKwh });
+                  ws.send(JSON.stringify([2, Math.random().toString(36).substring(2, 10), "RemoteStopTransaction", { transactionId: tx.id }]));
+                  io.emit('transaction_completed', { transactionId: tx.id, connectorId: tx.connector_id, final_kwh: realKwh, final_tjs: newAmount });
+                  io.emit('station_status_update');
                 } else {
-                  await db.run('UPDATE transactions SET consumed_kwh = ?, amount_tjs = ? WHERE id = ?', [realKwh, realKwh * globalPricePerKwh, tx.id]);
-                  io.emit('charging_update', { transaction_id: tx.id, connector_id: tx.connector_id, consumed_kwh: realKwh, amount_tjs: realKwh * globalPricePerKwh, status: 'charging', soc: currentSoc });
+                  // ОБНОВЛЕНИЕ
+                  await db.run('UPDATE transactions SET consumed_kwh = ?, amount_tjs = ? WHERE id = ?', [realKwh, newAmount, tx.id]);
+                  io.emit('charging_update', { transaction_id: tx.id, connector_id: tx.connector_id, consumed_kwh: realKwh, amount_tjs: newAmount, status: 'charging', soc: currentSoc, price_per_kwh: globalPricePerKwh });
                 }
               }
             } catch (e) { console.error('Ошибка MeterValues:', e); }
@@ -144,10 +131,19 @@ export function setupOcppServer(server: HttpServer, io: SocketIOServer) {
               await db.run('UPDATE transactions SET status = "completed", stop_time = CURRENT_TIMESTAMP WHERE id = ?', [payload.transactionId]);
               await db.run('UPDATE connectors SET status = "available" WHERE id = ?', [tx.connector_id]);
               io.emit('transaction_completed', { transactionId: payload.transactionId, connectorId: tx.connector_id, final_kwh: tx.consumed_kwh, final_tjs: tx.amount_tjs });
+              io.emit('station_status_update');
             }
           }
         }
-      } catch (err) { console.error('Ошибка обработки OCPP:', err); }
+      } catch (err) {}
+    });
+
+    ws.on('close', async () => {
+      activeConnections.delete(stationId);
+      const db = await getDB();
+      await db.run('UPDATE stations SET status = "offline" WHERE serial_number = ?', [stationId]);
+      await db.run('UPDATE connectors SET status = "faulted" WHERE station_id = (SELECT id FROM stations WHERE serial_number = ?)', [stationId]);
+      io.emit('station_status_update');
     });
   });
 }
@@ -158,7 +154,7 @@ export async function remoteStart(stationId: string, dbConnectorId: number, idTa
   const db = await getDB();
   const conn = await db.get('SELECT name FROM connectors WHERE id = ?', [dbConnectorId]);
   const physicalId = conn?.name?.match(/\d+/)?.[0] || 1;
-  ws.send(JSON.stringify([2, Math.random().toString(36).substring(2, 9), "RemoteStartTransaction", { connectorId: parseInt(physicalId), idTag, transactionId }]));
+  ws.send(JSON.stringify([2, Math.random().toString(36).substring(2, 9), "RemoteStartTransaction", { connectorId: parseInt(physicalId as string), idTag, transactionId }]));
   return true;
 }
 
