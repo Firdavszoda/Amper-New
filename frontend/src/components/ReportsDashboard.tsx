@@ -1,10 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import { api } from '../services/api';
 import { useAuthStore } from '../store/useAuthStore';
+import CashierReport from './CashierReport';
 
 export default function ReportsDashboard() {
   const { user } = useAuthStore();
-  const [activeTab, setActiveTab] = useState<'transactions' | 'finance'>('transactions');
+  const [activeTab, setActiveTab] = useState<'transactions' | 'finance' | 'shifts'>('transactions');
   const [data, setData] = useState<any[]>([]);
   const [summary, setSummary] = useState({ total_tjs: 0, total_kwh: 0, total_sessions: 0 });
   const [analytics, setAnalytics] = useState<any>(null);
@@ -29,27 +30,32 @@ export default function ReportsDashboard() {
 
   useEffect(() => { 
     const timer = setTimeout(() => {
-      loadData();
+      if (activeTab !== 'shifts') {
+        loadData();
+      }
     }, 0);
     return () => clearTimeout(timer);
-  }, [loadData]);
+  }, [loadData, activeTab]);
 
   return (
     <div className="p-6 space-y-6">
       <div className="flex justify-between items-center mb-6">
-        <h2 className="text-xl font-black uppercase tracking-widest text-slate-900 dark:text-white">Журнал транзакций</h2>
-        <button onClick={() => api.reports.downloadCsv({})} className="bg-emerald-500 hover:bg-emerald-600 text-white px-6 py-2.5 rounded-xl font-bold text-xs uppercase tracking-widest transition-all shadow-md shadow-emerald-500/20 active:scale-95">
-          Экспорт CSV
-        </button>
+        <h2 className="text-xl font-black uppercase tracking-widest text-slate-900 dark:text-white">Отчеты</h2>
       </div>
 
       {/* Вкладки навигации */}
-      <div className="flex gap-4 mb-6 border-b border-slate-200 dark:border-white/10 pb-4">
+      <div className="flex flex-wrap gap-4 mb-6 border-b border-slate-200 dark:border-white/10 pb-4">
         <button 
           onClick={() => setActiveTab('transactions')} 
           className={`px-4 py-2 rounded-lg font-bold text-xs uppercase tracking-widest transition-all ${activeTab === 'transactions' ? 'bg-emerald-500 text-white shadow-lg shadow-emerald-500/20' : 'text-slate-500 dark:text-gray-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-white/5'}`}
         >
           Журнал транзакций
+        </button>
+        <button 
+          onClick={() => setActiveTab('shifts')} 
+          className={`px-4 py-2 rounded-lg font-bold text-xs uppercase tracking-widest transition-all ${activeTab === 'shifts' ? 'bg-indigo-500 text-white shadow-lg shadow-indigo-500/20' : 'text-slate-500 dark:text-gray-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-white/5'}`}
+        >
+          Отчет кассиров
         </button>
         {user?.role !== 'cashier' && (
           <button 
@@ -60,6 +66,8 @@ export default function ReportsDashboard() {
           </button>
         )}
       </div>
+
+      {activeTab === 'shifts' && <CashierReport />}
 
       {activeTab === 'transactions' && (
         <>

@@ -7,6 +7,7 @@ import authRoutes from './api/auth.routes';
 import shiftRoutes from './api/shifts.routes';
 import transactionRoutes from './api/transactions.routes';
 import stationRoutes from './api/stations.routes';
+import connectorRoutes from './api/connectors.routes';
 import adminRoutes from './api/admin.routes';
 import settingsRoutes from './api/settings.routes';
 import reportsRoutes from './api/reports.routes';
@@ -40,17 +41,10 @@ app.use('/api/auth', authRoutes);
 app.use('/api/shifts', shiftRoutes);
 app.use('/api/transactions', transactionRoutes); 
 app.use('/api/stations', stationRoutes); 
+app.use('/api/connectors', connectorRoutes);
 app.use('/api/admin', adminRoutes); 
 app.use('/api/settings', settingsRoutes); 
-
-const authMiddleware = (req: any, res: any, next: any) => {
-  const userId = req.headers['x-user-id'];
-  const userRole = req.headers['x-user-role'];
-  if (userId) req.user = { id: parseInt(userId as string), role: userRole };
-  next();
-};
-
-app.use('/api/reports', authMiddleware, reportsRoutes); 
+app.use('/api/reports', reportsRoutes);
 
 async function startServer() {
   try {

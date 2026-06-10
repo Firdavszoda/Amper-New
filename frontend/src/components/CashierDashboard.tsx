@@ -30,9 +30,9 @@ const CashierDashboard: React.FC = () => {
     }
   }, [user, checkShift]);
 
-  const handleStartCharging = (connectorId: number, amount: number, isFullTank: boolean) => {
+  const handleStartCharging = async (connectorId: number, amount: number, isFullTank: boolean) => {
     if (currentShift) {
-      startCharging(connectorId, amount, isFullTank, currentShift.id);
+      await startCharging(connectorId, amount, isFullTank, currentShift.id);
     }
   };
 
@@ -57,7 +57,7 @@ const CashierDashboard: React.FC = () => {
             <button 
               onClick={async () => {
                 setIsOpening(true);
-                try { await openShift(user?.id); } catch(e) { console.error(e); } finally { setIsOpening(false); }
+                try { if (user) await openShift(user.id); } catch(e) { console.error(e); } finally { setIsOpening(false); }
               }}
               disabled={isOpening}
               className="w-full bg-emerald-600 hover:bg-emerald-500 text-white px-8 py-4 rounded-xl font-black text-sm uppercase tracking-widest transition-all shadow-lg shadow-emerald-900/20 active:scale-95 disabled:opacity-50 flex items-center justify-center gap-3"

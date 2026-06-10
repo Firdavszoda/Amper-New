@@ -9,7 +9,7 @@ const router = Router();
 router.get('/users', async (req, res) => {
   try {
     const db = await getDB();
-    const users = await db.all('SELECT id, username, role, created_at FROM users ORDER BY created_at DESC');
+    const users = await db.all('SELECT id, username, role FROM users ORDER BY id DESC');
     res.json(users);
   } catch (error) {
     res.status(500).json({ error: 'Ошибка получения пользователей' });

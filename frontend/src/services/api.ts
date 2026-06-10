@@ -44,6 +44,13 @@ async function request<T>(endpoint: string, options: RequestInit = {}): Promise<
 }
 
 export const api = {
+  // Auth
+  login: (data: { username: string; password: string }) => 
+    request<{ message: string; user: any }>('/auth/login', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
   // Stations
   getStations: () => request<Station[]>('/stations'),
   
@@ -104,18 +111,24 @@ export const api = {
       const q = new URLSearchParams(filteredParams as any).toString();
       return request<any>(`/reports/analytics?${q}`);
     },
+    getShifts: (params: any) => {
+      const filteredParams = Object.fromEntries(Object.entries(params).filter(([_, v]) => v != null && v !== ''));
+      const q = new URLSearchParams(filteredParams as any).toString();
+      return request<any>(`/reports/shifts?${q}`);
+    },
+    getCashiers: () => request<any[]>('/reports/cashiers-list'),
     downloadCsv: (params: any) => {
       const user = useAuthStore.getState().user;
       const filteredParams = Object.fromEntries(Object.entries(params).filter(([_, v]) => v != null && v !== ''));
       const qParams = new URLSearchParams(filteredParams as any);
-      
+
       // Для скачивания через window.open передаем ID/роль в query, 
       // так как заголовки в window.open не прокинуть легко
       if (user) {
         qParams.append('userId', user.id.toString());
         qParams.append('userRole', user.role);
       }
-      
+
       window.open(`${API_BASE_URL}/reports/export?${qParams.toString()}`, '_blank');
     }
   }

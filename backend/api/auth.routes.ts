@@ -5,26 +5,26 @@ const router = Router();
 
 // POST-запрос на http://localhost:3000/api/auth/login
 router.post('/login', async (req, res) => {
-  const { pinCode } = req.body; // Получаем пин-код от React
+  const { username, password } = req.body; 
 
-  if (!pinCode) {
-    return res.status(400).json({ error: 'Пин-код обязателен' });
+  if (!username || !password) {
+    return res.status(400).json({ error: 'Логин и пароль обязательны' });
   }
 
   try {
     const db = await getDB();
     
-    // Ищем сотрудника в базе по пин-коду
+    // Ищем сотрудника в базе по логину и паролю
     const user = await db.get(
-      'SELECT id, username, role FROM users WHERE pin_code = ?', 
-      [pinCode]
+      'SELECT id, username, role FROM users WHERE username = ? AND password = ?', 
+      [username, password]
     );
 
     if (!user) {
-      return res.status(401).json({ error: 'Неверный пин-код' });
+      return res.status(401).json({ error: 'Неверный логин или пароль' });
     }
 
-    // Если нашли, отдаем данные (без самого пин-кода в целях безопасности)
+    // Если нашли, отдаем данные (без самого пароля в целях безопасности)
     res.json({ 
       message: 'Успешный вход', 
       user: {

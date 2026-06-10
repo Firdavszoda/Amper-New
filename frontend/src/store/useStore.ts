@@ -13,6 +13,7 @@ interface AppState {
 
   fetchPrice: () => Promise<void>;
   fetchStations: () => Promise<void>;
+  fetchActiveTransactions: () => Promise<void>;
   startCharging: (connectorId: number, amount: number, isFullTank: boolean, shiftId: number) => Promise<void>;
   stopCharging: (transactionId: number, connectorId: number) => Promise<void>;
   initSocket: () => void;
@@ -89,13 +90,86 @@ export const useStore = create<AppState>((set, get) => ({
     });
 
     const refreshAll = () => {
-      // fetchStations already internally fetches both stations and activeTransactions
       get().fetchStations();
     };
 
-    socket.on('station_status_update', refreshAll);
-    socket.on('charging_update', refreshAll);
-    socket.on('transaction_completed', refreshAll);
+    socket.on('station_status_update', (data) => {
+      const connId = data?.connector_id || data?.connectorId;
+      if (connId && data.status) {
+        set((state) => ({
+          stations: state.stations.map(station => ({
+            ...station,
+            connectors: station.connectors.map(c => 
+              c.id === connId ? { ...c, status: data.status } : c
+            )
+          }))
+        }));
+      } else {
+        refreshAll();
+      }
+    });
+
+    socket.on('charging_update', (data) => {
+      set((state) => ({
+        activeTransactions: state.activeTransactions.map(t => 
+          t.connector_id == data.connectorId 
+            ? { ...t, consumed_kwh: data.kwh, amount_tjs: data.tjs, soc: data.soc } 
+            : t
+        )
+      }));
+    });
+
+    socket.on('transaction_completed', (data) => {
+      set((state) => ({
+        stations: state.stations.map(station => ({
+          ...station,
+          connectors: station.connectors.map(c => 
+            c.id == data.connectorId ? { ...c, status: 'available' } : c
+          )
+        })),
+        activeTransactions: state.activeTransactions.filter(t => t.id != data.transactionId)
+      }));
+    });
+
+    socket.on('transaction_stopped', (data) => {
+      set((state) => ({
+        stations: state.stations.map(station => ({
+          ...station,
+          connectors: station.connectors.map(c =>
+            c.id == data.connectorId ? { ...c, status: 'available' } : c
+          )
+        })),
+        // Используем нестрогое неравенство, чтобы избежать проблем с типами (String vs Number)
+        activeTransactions: state.activeTransactions.filter(t => t.id != data.transactionId)
+      }));
+    });
+
+    socket.on('transaction_started', (data) => {
+      set((state) => {
+        // Проверяем, нет ли уже этой транзакции в списке
+        if (state.activeTransactions.some(t => t.id === data.transactionId)) return state;
+
+        return {
+          stations: state.stations.map(station => ({
+            ...station,
+            connectors: station.connectors.map(c => 
+              c.id === data.connectorId ? { ...c, status: 'charging' } : c
+            )
+          })),
+          activeTransactions: [
+            ...state.activeTransactions,
+            {
+              id: data.transactionId,
+              connector_id: data.connectorId,
+              amount_tjs: 0,
+              consumed_kwh: 0,
+              is_full_tank: true, // Локальные старты обычно "до полного"
+              start_time: new Date().toISOString()
+            }
+          ]
+        };
+      });
+    });
   },
 
   fetchStations: async () => {
@@ -120,6 +194,23 @@ export const useStore = create<AppState>((set, get) => ({
       set({ error: error.message });
     } finally {
       set({ isLoading: false });
+    }
+  },
+
+  fetchActiveTransactions: async () => {
+    try {
+      const activeData = await api.getActiveTransactions();
+      const mappedActive: ActiveTransaction[] = activeData.map((tx: any) => ({
+        id: tx.id,
+        connector_id: tx.connector_id,
+        consumed_kwh: tx.consumed_kwh,
+        amount_tjs: tx.amount_tjs,
+        is_full_tank: tx.is_full_tank === 1,
+        start_time: tx.created_at
+      }));
+      set({ activeTransactions: mappedActive });
+    } catch (error: any) {
+      console.error('Ошибка обновления транзакций:', error);
     }
   },
 
@@ -152,11 +243,10 @@ export const useStore = create<AppState>((set, get) => ({
           }
         ]
       }));
-      
-      get().fetchStations();
     } catch (error: any) {
       set({ error: error.message });
       alert(`Ошибка: ${error.message}`);
+      throw error;
     } finally {
       set({ isLoading: false });
     }

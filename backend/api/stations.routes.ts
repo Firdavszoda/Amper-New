@@ -1,7 +1,22 @@
 import { Router } from 'express';
 import { getDB } from '../database/db';
+import { activeConnections, remoteStop, sendOcppCommandAndWait } from '../ocpp';
 
 const router = Router();
+
+// Вспомогательная функция для генерации ответа
+const handleOcppResponse = (res: any, response: any, successMessage: string) => {
+  const status = response.status; // Accepted, Rejected, NotSupported...
+  if (status === 'Accepted' || status === 'Scheduled') {
+    return res.json({ success: true, message: successMessage });
+  } else if (status === 'Rejected') {
+    return res.status(400).json({ error: 'Станция отклонила команду (Rejected)' });
+  } else if (status === 'NotSupported') {
+    return res.status(400).json({ error: 'Команда не поддерживается станцией (NotSupported)' });
+  } else {
+    return res.status(400).json({ error: `Неизвестный ответ: ${status}` });
+  }
+};
 
 // Получить все станции со вложенными коннекторами
 router.get('/', async (req, res) => {
@@ -24,6 +39,100 @@ router.get('/', async (req, res) => {
   } catch (error) {
     console.error('Error fetching stations:', error);
     res.status(500).json({ error: 'Database error' });
+  }
+});
+
+// 1. УПРАВЛЕНИЕ ЛОКАЛЬНОЙ АВТОРИЗАЦИЕЙ (ChangeConfiguration)
+router.post('/:serial/local-auth', async (req: any, res: any) => {
+  const { serial } = req.params;
+  const { enabled } = req.body; // true = Включить, false = Отключить
+  
+  const ws = activeConnections.get(serial);
+  if (!ws) return res.status(404).json({ error: 'Станция оффлайн' });
+
+  const value = enabled ? "true" : "false";
+  
+  try {
+    // Отправляем основной ключ LocalAuth (как просил заказчик)
+    const response = await sendOcppCommandAndWait(ws, "ChangeConfiguration", { key: "LocalAuth", value });
+    
+    // Дополнительно можно отправить стандартные ключи для надежности
+    await sendOcppCommandAndWait(ws, "ChangeConfiguration", { key: "LocalPreAuthorize", value }).catch(() => {});
+    
+    handleOcppResponse(res, response, `Локальная авторизация ${enabled ? 'ВКЛЮЧЕНА' : 'ОТКЛЮЧЕНА'}`);
+  } catch (err: any) { 
+    res.status(504).json({ error: err.message }); 
+  }
+});
+
+// 2. ИЗМЕНЕНИЕ ТАРИФА НА СТАНЦИИ
+router.post('/:serial/tariff', async (req: any, res: any) => {
+  const { serial } = req.params;
+  const { price } = req.body;
+  
+  const ws = activeConnections.get(serial);
+  if (!ws) return res.status(404).json({ error: 'Станция оффлайн' });
+
+  try {
+    const response = await sendOcppCommandAndWait(ws, "ChangeConfiguration", { 
+      key: "TariffPrice", 
+      value: String(price) 
+    });
+    handleOcppResponse(res, response, `Тариф на станции обновлен до ${price}`);
+  } catch (err: any) {
+    res.status(504).json({ error: err.message });
+  }
+});
+
+// 3. БРОНИРОВАНИЕ (ReserveNow)
+router.post('/:serial/reserve', async (req: any, res: any) => {
+  const { serial } = req.params;
+  const { connectorId, expiryDate, userIdTag, reservationId } = req.body;
+
+  const ws = activeConnections.get(serial);
+  if (!ws) return res.status(404).json({ error: 'Станция оффлайн' });
+
+  try {
+    const response = await sendOcppCommandAndWait(ws, "ReserveNow", {
+      connectorId: parseInt(connectorId),
+      expiryDate, // ISO 8601
+      idTag: userIdTag,
+      reservationId: parseInt(reservationId)
+    });
+    handleOcppResponse(res, response, 'Бронирование успешно создано');
+  } catch (err: any) {
+    res.status(504).json({ error: err.message });
+  }
+});
+
+// 4. ПЕРЕЗАГРУЗКА (Soft / Hard Reset)
+router.post('/:serial/reset', async (req: any, res: any) => {
+  const { serial } = req.params;
+  const { type } = req.body; // "Soft" или "Hard"
+  const ws = activeConnections.get(serial);
+  
+  if (!ws) return res.status(404).json({ error: 'Станция оффлайн' });
+  
+  try {
+    const response = await sendOcppCommandAndWait(ws, "Reset", { type });
+    handleOcppResponse(res, response, `Команда ${type} Reset успешно принята`);
+  } catch (err: any) { 
+    res.status(504).json({ error: err.message }); 
+  }
+});
+
+// 5. ОЧИСТКА КЭША (ClearCache)
+router.post('/:serial/clear-cache', async (req: any, res: any) => {
+  const serial = req.params.serial;
+  const ws = activeConnections.get(serial);
+  
+  if (!ws) return res.status(404).json({ error: 'Станция оффлайн' });
+  
+  try {
+    const response = await sendOcppCommandAndWait(ws, "ClearCache", {});
+    handleOcppResponse(res, response, 'Кэш успешно очищен');
+  } catch (err: any) { 
+    res.status(504).json({ error: err.message }); 
   }
 });
 

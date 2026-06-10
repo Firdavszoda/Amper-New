@@ -72,25 +72,23 @@ export async function initDB() {
       finished_at DATETIME,
       meter_start REAL DEFAULT 0,
       is_full_tank INTEGER DEFAULT 0,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      id_tag TEXT
+    );
+
+    -- 9. НОВАЯ: Таблица RFID карт
+    CREATE TABLE IF NOT EXISTS rfid_cards (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      id_tag TEXT NOT NULL UNIQUE,
+      is_active INTEGER DEFAULT 1,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );
-
-    -- 6. Таблица логов безопасности для отслеживания махинаций
-    CREATE TABLE IF NOT EXISTS security_logs (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      station_id INTEGER,
-      event_type TEXT NOT NULL,       -- Например: 'UNAUTHORIZED_CHARGE_ATTEMPT'
-      description TEXT,
-      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-      FOREIGN KEY (station_id) REFERENCES stations(id)
-    );
-
-    -- 8. Таблица настроек системы
-    CREATE TABLE IF NOT EXISTS settings (
-      key TEXT PRIMARY KEY, 
-      value TEXT
-    );
   `);
+
+  // Обеспечиваем наличие колонки id_tag, если таблица уже существовала
+  try {
+    await dbInstance.run('ALTER TABLE transactions ADD COLUMN id_tag TEXT');
+  } catch (e) { /* Игнорируем ошибку, если колонка уже есть */ }
 
   // Установка настроек по умолчанию
   await dbInstance.run(`INSERT OR IGNORE INTO settings (key, value) VALUES ('smart_stop_reserve_sec', '20')`);

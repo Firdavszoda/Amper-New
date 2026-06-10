@@ -19,7 +19,7 @@ export interface Station {
   id: number;
   name: string;
   serial_number: string;
-  status: 'online' | 'offline' | 'faulted';
+  status: 'online' | 'offline' | 'faulted' | 'unavailable';
   connectors: Connector[]; 
 }
 

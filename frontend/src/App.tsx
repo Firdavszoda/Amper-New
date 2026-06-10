@@ -9,7 +9,7 @@ import AdminDashboard from './components/AdminDashboard';
 import FinancierDashboard from './components/FinancierDashboard';
 import ReportsDashboard from './components/ReportsDashboard';
 
-import { Sun, Moon } from 'lucide-react';
+import { Sun, Moon, RefreshCw } from 'lucide-react';
 
 interface LayoutProps {
   children: React.ReactNode;
@@ -25,11 +25,13 @@ const Layout: React.FC<LayoutProps> = ({ children, isDarkMode, setIsDarkMode }) 
   const [shiftReport, setShiftReport] = React.useState<{ revenue: number } | null>(null);
 
   const handleLogout = () => {
+    if (user?.role === 'cashier' && currentShift) {
+      alert('Сначала закройте кассовую смену, чтобы выйти из системы!');
+      return;
+    }
     logout();
     navigate('/login');
   };
-
-  const isCashierRoute = location.pathname === '/cashier';
 
   return (
     <div className="min-h-screen transition-colors duration-300 flex flex-col">
@@ -59,6 +61,15 @@ const Layout: React.FC<LayoutProps> = ({ children, isDarkMode, setIsDarkMode }) 
           {/* ПРАВАЯ ЧАСТЬ: Тема, Кнопка закрытия, Профиль, Выход */}
           <div className="flex items-center gap-6">
             
+            {/* Обновить данные */}
+            <button 
+              onClick={() => window.location.reload()}
+              className="hidden md:flex items-center gap-2 bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-500 dark:text-indigo-400 px-4 py-2 rounded-xl text-xs font-black uppercase tracking-widest transition-colors shadow-sm"
+              title="Обновить данные страницы"
+            >
+              <RefreshCw size={14} className="text-indigo-500 dark:text-indigo-400" /> Обновить данные
+            </button>
+
             {/* Переключатель темы */}
             <button 
               onClick={() => setIsDarkMode(!isDarkMode)}

@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { getDB } from '../database/db';
-import { loadGlobalPrice, globalPricePerKwh } from '../ocpp';
+import { loadGlobalPrice, globalPricePerKwh, activeConnections, sendOcppCommandAndWait } from '../ocpp';
 
 const router = Router();
 
@@ -29,7 +29,7 @@ router.get('/price', (req, res) => {
 });
 
 // Обновить цену
-router.post('/price', async (req, res) => {
+router.post('/price', async (req: any, res: any) => {
   const { price_per_kwh } = req.body;
   const price = typeof price_per_kwh === 'string' ? parseFloat(price_per_kwh) : price_per_kwh;
 
@@ -45,6 +45,18 @@ router.post('/price', async (req, res) => {
       [price.toString(), price.toString()]
     );
     await loadGlobalPrice();
+
+    // РАССЫЛКА НОВОГО ТАРИФА НА ВСЕ СТАНЦИИ
+    if (activeConnections.size > 0) {
+      console.log(`📢 Рассылка нового тарифа (${globalPricePerKwh}) на ${activeConnections.size} станций...`);
+      for (const [serial, ws] of activeConnections.entries()) {
+        sendOcppCommandAndWait(ws, "ChangeConfiguration", { 
+          key: "TariffPrice", 
+          value: String(globalPricePerKwh) 
+        }).catch(err => console.error(`❌ Ошибка обновления тарифа на ${serial}:`, err.message));
+      }
+    }
+
     if (req.io) {
       req.io.emit('price_updated', { price_per_kwh: globalPricePerKwh });
     }
@@ -56,7 +68,7 @@ router.post('/price', async (req, res) => {
 });
 
 // Обновить резерв
-router.post('/reserve', async (req, res) => {
+router.post('/reserve', async (req: any, res: any) => {
   const { stop_reserve_wh } = req.body;
   const reserve = typeof stop_reserve_wh === 'string' ? parseFloat(stop_reserve_wh) : stop_reserve_wh;
 
@@ -72,6 +84,18 @@ router.post('/reserve', async (req, res) => {
       [reserve.toString(), reserve.toString()]
     );
     await loadGlobalPrice();
+
+    // РАССЫЛКА НОВОГО РЕЗЕРВА НА ВСЕ СТАНЦИИ
+    if (activeConnections.size > 0) {
+      console.log(`📢 Рассылка нового резерва (${reserve} Wh) на ${activeConnections.size} станций...`);
+      for (const [serial, ws] of activeConnections.entries()) {
+        sendOcppCommandAndWait(ws, "ChangeConfiguration", { 
+          key: "StopReserveWh", 
+          value: String(reserve) 
+        }).catch(err => console.error(`❌ Ошибка обновления резерва на ${serial}:`, err.message));
+      }
+    }
+
     res.json({ success: true, new_reserve: reserve });
   } catch (error) {
     console.error('Ошибка сохранения резерва:', error);

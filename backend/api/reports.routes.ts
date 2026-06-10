@@ -163,4 +163,119 @@ router.get('/analytics', async (req: any, res) => {
   }
 });
 
+// 5. ОТЧЕТ ПО СМЕНАМ (Для старого компонента ShiftReport)
+router.get('/shifts', async (req: any, res) => {
+  try {
+    const db = await getDB();
+    const { date, cashier_id } = req.query;
+    
+    let whereStr = "WHERE t.status = 'completed'";
+    const params: any[] = [];
+    
+    if (date) {
+      whereStr += " AND date(t.created_at) = ?";
+      params.push(date);
+    }
+    
+    if (cashier_id) {
+      whereStr += " AND sh.user_id = ?";
+      params.push(cashier_id);
+    }
+
+    const summaryQuery = `
+      SELECT SUM(t.amount_tjs) as total_revenue, SUM(t.consumed_kwh) as total_kwh, COUNT(t.id) as operations_count
+      FROM transactions t
+      LEFT JOIN shifts sh ON t.shift_id = sh.id
+      ${whereStr}
+    `;
+    const summaryRes = await db.get(summaryQuery, params);
+
+    const txQuery = `
+      SELECT t.id, t.created_at as time, s.name as station, c.name as connector, t.consumed_kwh, t.amount_tjs
+      FROM transactions t
+      LEFT JOIN shifts sh ON t.shift_id = sh.id
+      LEFT JOIN connectors c ON t.connector_id = c.id
+      LEFT JOIN stations s ON c.station_id = s.id
+      ${whereStr}
+      ORDER BY t.created_at DESC
+    `;
+    const transactions = await db.all(txQuery, params);
+
+    res.json({
+      total_revenue: summaryRes.total_revenue || 0,
+      total_kwh: summaryRes.total_kwh || 0,
+      operations_count: summaryRes.operations_count || 0,
+      transactions
+    });
+  } catch (error) {
+    console.error('Shifts Report Error:', error);
+    res.status(500).json({ error: 'Ошибка БД' });
+  }
+});
+
+// НОВЫЙ ОТЧЕТ КАССИРОВ (с фильтрами)
+router.get('/cashiers', async (req, res) => {
+  console.log('✅ ЗАПРОС ДОШЕЛ ДО ОТЧЕТОВ:', req.query); // Маркер
+  const { startDate, endDate, stationId, cashier } = req.query;
+  try {
+    const db = await getDB();
+    
+    let query = `
+      SELECT t.*, c.name as connector_name, s.name as station_name 
+      FROM transactions t
+      LEFT JOIN connectors c ON t.connector_id = c.id
+      LEFT JOIN stations s ON c.station_id = s.id
+      LEFT JOIN shifts sh ON t.shift_id = sh.id
+      LEFT JOIN users u ON sh.user_id = u.id
+      WHERE t.status = 'completed'
+    `;
+    const params: any[] = [];
+
+    // Фильтр по диапазону дат (включая время от начала первого дня до конца второго)
+    if (startDate && endDate) {
+      query += ` AND t.stop_time >= datetime(? || ' 00:00:00') AND t.stop_time <= datetime(? || ' 23:59:59')`;
+      params.push(startDate, endDate);
+    }
+    // Фильтр по станции
+    if (stationId && stationId !== 'all') {
+      query += ` AND s.id = ?`;
+      params.push(stationId);
+    }
+    // Фильтр по кассиру
+    if (cashier && cashier !== 'all') { 
+      query += ` AND u.username = ?`; 
+      params.push(cashier); 
+    }
+
+    query += ` ORDER BY t.created_at DESC`;
+    
+    const transactions = await db.all(query, params);
+
+    // Считаем агрегацию
+    const total_revenue = transactions.reduce((sum, tx) => sum + (tx.amount_tjs || 0), 0);
+    const total_kwh = transactions.reduce((sum, tx) => sum + (tx.consumed_kwh || 0), 0);
+
+    res.json({
+      total_revenue,
+      total_kwh,
+      operations_count: transactions.length,
+      transactions
+    });
+  } catch (error) {
+    console.error('Ошибка отчета:', error);
+    res.status(500).json({ error: 'Ошибка сервера' });
+  }
+});
+
+// Получение списка кассиров для фильтра
+router.get('/cashiers-list', async (req, res) => {
+  try {
+    const db = await getDB();
+    const cashiers = await db.all('SELECT id, username FROM users WHERE role = "cashier"');
+    res.json(cashiers);
+  } catch (error) {
+    res.status(500).json({ error: 'Ошибка БД' });
+  }
+});
+
 export default router;

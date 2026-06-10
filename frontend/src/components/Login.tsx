@@ -16,13 +16,16 @@ const Login: React.FC = () => {
     setIsLoading(true);
     setError('');
     
-    // Имитация задержки сети для солидности
-    await new Promise(r => setTimeout(r, 800));
-
-    if (login(username, password)) {
-      navigate('/');
-    } else {
-      setError('Неверный логин или пароль');
+    try {
+      const success = await login(username, password);
+      if (success) {
+        navigate('/');
+      } else {
+        setError('Неверный логин или пароль');
+      }
+    } catch (err: any) {
+      setError(err.message || 'Ошибка сети');
+    } finally {
       setIsLoading(false);
     }
   };
@@ -107,7 +110,7 @@ const Login: React.FC = () => {
 
         {/* Подвал */}
         <p className="text-center mt-10 text-[10px] font-black text-slate-400 dark:text-gray-600 uppercase tracking-[0.3em]">
-          &copy; 2026 AMPERE ENERGY SYSTEMS
+           2026 AMPERE ENERGY SYSTEMS
         </p>
       </div>
     </div>
