@@ -58,7 +58,7 @@ export function setupOcppServer(server: HttpServer, io: SocketIOServer) {
             ws.send(JSON.stringify([3, messageId, { status: 'Accepted', currentTime: new Date().toISOString(), interval: 300 }]));
             
             if (action === 'BootNotification') {
-              // Гарантированная отправка тарифа и настроек через 2 секунды
+              // Гарантированная отправка тарифа и настроек через 1.5 секунды после ответа Accepted
               setTimeout(async () => {
                 try {
                   const db = await getDB();
@@ -68,23 +68,27 @@ export function setupOcppServer(server: HttpServer, io: SocketIOServer) {
                   const intervalSetting = await db.get('SELECT value FROM settings WHERE key = "meter_interval_sec"');
                   const intervalValue = intervalSetting ? intervalSetting.value : "2";
 
-                  ws.send(JSON.stringify([2, `config-boot-tariff-${Date.now()}`, "ChangeConfiguration", { 
+                  // Отправляем команды последовательно для надежности
+                  await sendOcppCommandAndWait(ws, "ChangeConfiguration", { 
                     key: "TariffPrice", 
                     value: String(currentTariff) 
-                  }]));
+                  }).catch(e => console.error(`Ошибка TariffPrice на ${stationId}:`, e.message));
 
-                  ws.send(JSON.stringify([2, `config-boot-interval-${Date.now()}`, "ChangeConfiguration", { 
+                  await sendOcppCommandAndWait(ws, "ChangeConfiguration", { 
                     key: "MeterValueSampleInterval", 
                     value: String(intervalValue) 
-                  }]));
+                  }).catch(e => console.error(`Ошибка MeterInterval на ${stationId}:`, e.message));
                   
-                  ws.send(JSON.stringify([2, `config-boot-data-${Date.now()}`, "ChangeConfiguration", { key: "MeterValuesSampledData", value: "Energy.Active.Import.Register,Power.Active.Import,SoC" }]));
+                  await sendOcppCommandAndWait(ws, "ChangeConfiguration", { 
+                    key: "MeterValuesSampledData", 
+                    value: "Energy.Active.Import.Register,Power.Active.Import,SoC" 
+                  }).catch(e => console.error(`Ошибка SampledData на ${stationId}:`, e.message));
                   
                   console.log(`⚙️ Станция ${stationId} синхронизирована. Тариф: ${currentTariff}, Интервал: ${intervalValue}с`);
                 } catch(e) {
-                  console.error("Ошибка при отправке настроек на Boot:", e);
+                  console.error("Ошибка при синхронизации после Boot:", e);
                 }
-              }, 2000);
+              }, 1500);
             }
           }
 

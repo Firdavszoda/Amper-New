@@ -300,4 +300,49 @@ router.get('/cashiers-list', async (req, res) => {
   }
 });
 
+// 6. СПИСОК СМЕН С АГРЕГАЦИЕЙ
+router.get('/shifts-list', async (req: any, res) => {
+  try {
+    const db = await getDB();
+    const { startDate, endDate, cashier } = req.query;
+    
+    let query = `
+      SELECT 
+        sh.id, 
+        u.username as cashier_name, 
+        sh.start_time, 
+        sh.end_time, 
+        sh.status,
+        SUM(t.consumed_kwh) as total_kwh, 
+        SUM(t.amount_tjs) as total_tjs
+      FROM shifts sh
+      JOIN users u ON sh.user_id = u.id
+      LEFT JOIN transactions t ON t.shift_id = sh.id
+      WHERE sh.status = 'closed'
+    `;
+    const params: any[] = [];
+
+    if (cashier && cashier !== 'all') {
+      query += ` AND u.username = ?`;
+      params.push(cashier);
+    }
+
+    if (startDate && endDate) {
+      query += ` AND sh.start_time >= datetime(? || ' 00:00:00') AND sh.start_time <= datetime(? || ' 23:59:59')`;
+      params.push(startDate, endDate);
+    } else if (startDate) {
+      query += ` AND sh.start_time >= datetime(? || ' 00:00:00')`;
+      params.push(startDate);
+    }
+
+    query += ` GROUP BY sh.id ORDER BY sh.start_time DESC`;
+    
+    const shifts = await db.all(query, params);
+    res.json(shifts);
+  } catch (error) {
+    console.error('Shifts List Error:', error);
+    res.status(500).json({ error: 'Ошибка БД' });
+  }
+});
+
 export default router;

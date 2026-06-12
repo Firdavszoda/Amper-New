@@ -155,7 +155,8 @@ const CashierReport = () => {
           <table className="w-full text-left text-sm text-slate-500 dark:text-gray-400">
             <thead className="bg-slate-50 dark:bg-black/40 text-[10px] font-black text-slate-500 dark:text-gray-500 uppercase tracking-widest">
               <tr>
-                <th className="px-6 py-5 border-b border-slate-200 dark:border-white/5">Детали операции</th>
+                <th className="px-6 py-5 border-b border-slate-200 dark:border-white/5">Дата и время</th>
+                <th className="px-6 py-5 border-b border-slate-200 dark:border-white/5">Кассир</th>
                 <th className="px-6 py-5 border-b border-slate-200 dark:border-white/5">Колонка</th>
                 <th className="px-6 py-5 border-b border-slate-200 dark:border-white/5 text-right text-emerald-600 dark:text-emerald-400">Энергия</th>
                 <th className="px-6 py-5 border-b border-slate-200 dark:border-white/5 text-right text-slate-900 dark:text-white">Сумма</th>
@@ -163,19 +164,19 @@ const CashierReport = () => {
             </thead>
             <tbody className="divide-y divide-slate-100 dark:divide-white/5">
               {isLoading ? (
-                <tr><td colSpan={4} className="px-6 py-12 text-center text-slate-400 dark:text-gray-500 uppercase text-xs font-black tracking-widest animate-pulse">Загрузка данных...</td></tr>
+                <tr><td colSpan={5} className="px-6 py-12 text-center text-slate-400 dark:text-gray-500 uppercase text-xs font-black tracking-widest animate-pulse">Загрузка данных...</td></tr>
               ) : reportData.transactions.length === 0 ? (
-                <tr><td colSpan={4} className="px-6 py-12 text-center text-slate-400 dark:text-gray-500 uppercase text-xs font-black tracking-widest">За выбранный период данных нет</td></tr>
+                <tr><td colSpan={5} className="px-6 py-12 text-center text-slate-400 dark:text-gray-500 uppercase text-xs font-black tracking-widest">За выбранный период данных нет</td></tr>
               ) : (
                 reportData.transactions.map((tx: any, idx: number) => (
                   <tr key={idx} className="hover:bg-slate-50 dark:hover:bg-white/5 transition-colors">
+                    <td className="px-6 py-4 font-mono text-xs text-slate-500">
+                        {new Date(tx.created_at).toLocaleString('ru-RU', { timeZone: 'Asia/Dushanbe', day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                    </td>
                     <td className="px-6 py-4">
-                       <div className="text-[11px] font-bold text-slate-700 dark:text-white uppercase tracking-tight">
-                         Кассир <span className="text-indigo-500">{tx.cashier_name || 'Система'}</span> {new Date(tx.created_at).toLocaleDateString('ru-RU')} в {new Date(tx.created_at).toLocaleTimeString('ru-RU', {hour: '2-digit', minute:'2-digit'})}
-                       </div>
-                       <div className="text-[10px] text-slate-400 dark:text-gray-500 font-medium">
-                         Зарядил машину на колонке {tx.station_name} ({tx.connector_name})
-                       </div>
+                        <div className="text-[11px] font-black text-indigo-500 uppercase tracking-tight">
+                            {tx.cashier_name || 'СИСТЕМА'}
+                        </div>
                     </td>
                     <td className="px-6 py-4">
                       <div className="text-xs font-medium text-slate-700 dark:text-white">{tx.station_name}</div>
