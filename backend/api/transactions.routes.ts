@@ -39,9 +39,9 @@ router.post('/start', async (req: any, res: any) => {
     await db.run('BEGIN TRANSACTION');
     
     const result = await db.run(
-      `INSERT INTO transactions (shift_id, connector_id, amount_tjs, target_kwh, consumed_kwh, status, is_full_tank, start_time, id_tag)
-       VALUES (?, ?, ?, ?, 0, 'pending', ?, CURRENT_TIMESTAMP, 'TEMP')`,
-      [shift_id, connector_id, amount_tjs, target_kwh, is_full_tank ? 1 : 0]
+      `INSERT INTO transactions (shift_id, connector_id, amount_tjs, target_kwh, target_amount, consumed_kwh, status, is_full_tank, start_time, id_tag)
+       VALUES (?, ?, 0, ?, ?, 0, 'pending', ?, CURRENT_TIMESTAMP, 'TEMP')`,
+      [shift_id, connector_id, target_kwh, amount_tjs, is_full_tank ? 1 : 0]
     );
     
     const transactionId = result.lastID;

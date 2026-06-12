@@ -65,6 +65,7 @@ export async function initDB() {
       connector_id INTEGER,
       amount_tjs REAL,
       target_kwh REAL,
+      target_amount REAL DEFAULT 0,
       consumed_kwh REAL DEFAULT 0,
       status TEXT DEFAULT 'charging',
       start_time DATETIME DEFAULT CURRENT_TIMESTAMP,
@@ -76,6 +77,22 @@ export async function initDB() {
       id_tag TEXT
     );
 
+    -- 6. НОВАЯ: Таблица настроек
+    CREATE TABLE IF NOT EXISTS settings (
+      key TEXT PRIMARY KEY,
+      value TEXT NOT NULL
+    );
+
+    -- 7. НОВАЯ: Таблица логов
+    CREATE TABLE IF NOT EXISTS logs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER,
+      action TEXT NOT NULL,
+      details TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY(user_id) REFERENCES users(id)
+    );
+
     -- 9. НОВАЯ: Таблица RFID карт
     CREATE TABLE IF NOT EXISTS rfid_cards (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -85,13 +102,18 @@ export async function initDB() {
     );
   `);
 
-  // Обеспечиваем наличие колонки id_tag, если таблица уже существовала
+  // Обеспечиваем наличие колонок, если таблица уже существовала
   try {
     await dbInstance.run('ALTER TABLE transactions ADD COLUMN id_tag TEXT');
-  } catch (e) { /* Игнорируем ошибку, если колонка уже есть */ }
+  } catch (e) { }
+  try {
+    await dbInstance.run('ALTER TABLE transactions ADD COLUMN target_amount REAL DEFAULT 0');
+  } catch (e) { }
 
   // Установка настроек по умолчанию
   await dbInstance.run(`INSERT OR IGNORE INTO settings (key, value) VALUES ('smart_stop_reserve_sec', '20')`);
+  await dbInstance.run(`INSERT OR IGNORE INTO settings (key, value) VALUES ('price_per_kwh', '3.6')`);
+  await dbInstance.run(`INSERT OR IGNORE INTO settings (key, value) VALUES ('stop_reserve_wh', '200')`);
 
   await seedInitialData();
   console.log('✅ База данных SQLite успешно инициализирована (Защита уровня PRO + Смены + Ручки + Логи)!');

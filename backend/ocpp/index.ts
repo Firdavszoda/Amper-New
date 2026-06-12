@@ -70,7 +70,7 @@ export function setupOcppServer(server: HttpServer, io: SocketIOServer) {
                     value: String(currentTariff) 
                   }]));
 
-                  ws.send(JSON.stringify([2, `config-boot-interval-${Date.now()}`, "ChangeConfiguration", { key: "MeterValueSampleInterval", value: "10" }]));
+                  ws.send(JSON.stringify([2, `config-boot-interval-${Date.now()}`, "ChangeConfiguration", { key: "MeterValueSampleInterval", value: "5" }]));
                   ws.send(JSON.stringify([2, `config-boot-data-${Date.now()}`, "ChangeConfiguration", { key: "MeterValuesSampledData", value: "Energy.Active.Import.Register,Power.Active.Import,SoC" }]));
                   
                   console.log(`⚙️ Станция ${stationId} синхронизирована. Тариф: ${currentTariff}`);
@@ -185,44 +185,53 @@ export function setupOcppServer(server: HttpServer, io: SocketIOServer) {
           if (action === 'MeterValues') {
             ws.send(JSON.stringify([3, messageId, {}]));
             const { connectorId, transactionId, meterValue } = payload;
-            let wh = 0;
+            let currentMeter = 0; 
+            let currentPower = 0; // В Ваттах
             let soc = null;
-
-            // Парсим массив значений: ищем Energy и SoC
+            
             if (Array.isArray(meterValue)) {
                 for (const mv of meterValue) {
                     for (const sv of mv.sampledValue) {
-                        if (sv.measurand === 'Energy.Active.Import.Register' || !sv.measurand) wh = parseFloat(sv.value);
-                        if (sv.measurand === 'SoC') soc = parseInt(sv.value, 10);
+                        const measurand = sv.measurand || 'Energy.Active.Import.Register';
+                        if (measurand === 'Energy.Active.Import.Register') currentMeter = parseFloat(sv.value);
+                        if (measurand === 'Power.Active.Import') currentPower = parseFloat(sv.value);
+                        if (measurand === 'SoC') soc = parseInt(sv.value, 10);
                     }
                 }
             }
 
-            if (wh > 0) {
-                const kwh = wh / 1000;
-                const current_tjs = kwh * globalPricePerKwh;
+            const db = await getDB();
+            const tx = await db.get('SELECT meter_start, target_amount FROM transactions WHERE id = ?', [transactionId]);
+            
+            if (tx) {
+                const consumedKwh = Math.max(0, (currentMeter - (tx.meter_start || 0)) / 1000);
+                const currentTjs = consumedKwh * globalPricePerKwh;
 
-                // ЛОГИКА АВТОСТОПА: Останавливаем только если лимит достигнут
-                try {
-                    const db = await getDB();
-                    // Лимит хранится в amount_tjs
-                    const tx = await db.get('SELECT amount_tjs as target_amount FROM transactions WHERE id = ?', [transactionId]);
-                    
-                    // Порог "близости": останавливаем, если до лимита осталось меньше 0.05 TJS
-                    if (tx && tx.target_amount > 0 && current_tjs >= (tx.target_amount - 0.05)) {
-                        console.log(`🛑 СТОП: Достигнут лимит. Текущая сумма: ${current_tjs}, Лимит: ${tx.target_amount}`);
-                        sendOcppCommandAndWait(ws, "RemoteStopTransaction", { transactionId }).catch(() => {});
-                    } else {
-                        await db.run('UPDATE transactions SET consumed_kwh = ?, amount_tjs = ? WHERE id = ?', [kwh, current_tjs, transactionId]);
-                    }
-                } catch (e) { console.error(e); }
+                // Резерв в сомони (например, 200Wh * 3.6 = 0.72 TJS)
+                // Это "базовый" защитный слой.
+                const baseReserveTjs = (globalReserveWh / 1000) * globalPricePerKwh;
+                
+                // Динамический резерв: сколько будет потреблено за следующие 5-10 секунд при текущей мощности
+                // (если мощность 160кВт, то за 5 сек это ~222Wh или 0.8 TJS)
+                const powerReserveTjs = (currentPower > 0) ? (currentPower * (5/3600) / 1000) * globalPricePerKwh : 0;
+                
+                // Итоговый резерв - берем большее из двух
+                const totalReserveTjs = Math.max(baseReserveTjs, powerReserveTjs);
 
-                io.emit('charging_update', {
-                    connectorId,
-                    transactionId,
-                    kwh: parseFloat(kwh.toFixed(2)),
-                    tjs: parseFloat(current_tjs.toFixed(2)),
-                    soc: soc
+                // СТРОГИЙ АВТОСТОП: Останавливаем заранее. 
+                // Если текущая сумма + резерв уже близко к лимиту - СТОП.
+                if (tx.target_amount > 0 && currentTjs >= (tx.target_amount - totalReserveTjs)) {
+                    console.log(`🛡 СТРОГИЙ АВТОСТОП: Лимит ${tx.target_amount}. Сумма ${currentTjs.toFixed(2)}. Резерв ${totalReserveTjs.toFixed(2)}. СТОП!`);
+                    sendOcppCommandAndWait(ws, "RemoteStopTransaction", { transactionId }).catch(() => {});
+                }
+
+                // Рассылаем данные в UI
+                io.emit('charging_update', { 
+                  connectorId, 
+                  transactionId, 
+                  kwh: Number(consumedKwh.toFixed(3)), 
+                  tjs: Number(currentTjs.toFixed(2)), 
+                  soc 
                 });
             }
           }
@@ -230,33 +239,18 @@ export function setupOcppServer(server: HttpServer, io: SocketIOServer) {
           if (action === 'StopTransaction') {
             const { transactionId, meterStop } = payload;
             ws.send(JSON.stringify([3, messageId, { idTagInfo: { status: "Accepted" } }]));
+            
+            const db = await getDB();
+            const tx = await db.get('SELECT meter_start, connector_id FROM transactions WHERE id = ?', [transactionId]);
+            
+            // СЧИТАЕМ ТОЛЬКО ПО ИТОГОВОМУ СЧЕТЧИКУ
+            const final_kwh = (meterStop - (tx?.meter_start || 0)) / 1000;
+            const final_tjs = final_kwh * globalPricePerKwh;
 
-            try {
-                const db = await getDB();
-                const tx = await db.get('SELECT meter_start, connector_id FROM transactions WHERE id = ?', [transactionId]);
-                
-                // СЧИТАЕМ ПО ФАКТУ ОСТАНОВКИ ( meterStop - это ИСТИНА)
-                const meterStart = tx ? tx.meter_start : 0;
-                let final_kwh = (meterStop - meterStart) / 1000;
-                if (final_kwh < 0) final_kwh = 0;
-                const final_tjs = final_kwh * globalPricePerKwh;
+            await db.run('UPDATE transactions SET status = "completed", consumed_kwh = ?, amount_tjs = ? WHERE id = ?', 
+                         [final_kwh, final_tjs, transactionId]);
 
-                await db.run('UPDATE transactions SET status = "completed", stop_time = CURRENT_TIMESTAMP, consumed_kwh = ?, amount_tjs = ?, meter_stop = ? WHERE id = ?', 
-                             [final_kwh, final_tjs, meterStop, transactionId]);
-                
-                if (tx) {
-                    await db.run('UPDATE connectors SET status = "available" WHERE id = ?', [tx.connector_id]);
-                }
-
-                io.emit('transaction_stopped', {
-                    transactionId,
-                    connectorId: tx?.connector_id || 1,
-                    final_kwh,
-                    final_tjs
-                });
-                io.emit('transaction_completed', { transactionId, connectorId: tx?.connector_id || 1, final_kwh, final_tjs });
-                io.emit('station_status_update');
-            } catch (e) { console.error("Ошибка в StopTransaction", e); }
+            io.emit('transaction_stopped', { transactionId, connectorId: tx?.connector_id || 1, final_kwh, final_tjs });
           }
         } 
         else if (messageTypeId === 3) {
