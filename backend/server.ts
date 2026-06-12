@@ -30,6 +30,15 @@ app.use(express.json());
 
 app.use((req: any, res, next) => {
   req.io = io;
+  
+  // Эмуляция авторизации через заголовки (для упрощения текущей архитектуры)
+  const userId = req.headers['x-user-id'];
+  const userRole = req.headers['x-user-role'];
+  
+  if (userId && userRole) {
+    req.user = { id: parseInt(userId as string), role: userRole };
+  }
+  
   next();
 });
 

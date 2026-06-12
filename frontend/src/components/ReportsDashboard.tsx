@@ -1,32 +1,39 @@
 import React, { useState, useEffect } from 'react';
 import { api } from '../services/api';
 import { useAuthStore } from '../store/useAuthStore';
+import { useStore } from '../store/useStore';
 import CashierReport from './CashierReport';
+import { Calendar, MapPin, User as UserIcon, Search } from 'lucide-react';
 
 export default function ReportsDashboard() {
   const { user } = useAuthStore();
-  const [activeTab, setActiveTab] = useState<'transactions' | 'finance' | 'shifts'>('transactions');
+  const { fetchStations } = useStore();
+  const [activeTab, setActiveTab] = useState<'transactions' | 'shifts'>('transactions');
   const [data, setData] = useState<any[]>([]);
   const [summary, setSummary] = useState({ total_tjs: 0, total_kwh: 0, total_sessions: 0 });
-  const [analytics, setAnalytics] = useState<any>(null);
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
+
+  useEffect(() => {
+    fetchStations();
+  }, []);
 
   const loadData = React.useCallback(async () => {
     try {
       if (activeTab === 'transactions') {
-        const res = await api.reports.getTransactions({ page, limit: 15 });
+        const params = { 
+          page, 
+          limit: 15
+        };
+        const res = await api.reports.getTransactions(params);
         setData(res.data);
         setTotalPages(res.pagination.totalPages);
         
-        const sum = await api.reports.getSummary({});
+        const sum = await api.reports.getSummary(params);
         setSummary(sum);
-      } else if (activeTab === 'finance' && user?.role !== 'cashier') {
-        const res = await api.reports.getAnalytics({});
-        setAnalytics(res);
       }
     } catch (e) { console.error('Ошибка загрузки отчетов', e); }
-  }, [activeTab, page, user]);
+  }, [activeTab, page]);
 
   useEffect(() => { 
     const timer = setTimeout(() => {
@@ -46,7 +53,7 @@ export default function ReportsDashboard() {
       {/* Вкладки навигации */}
       <div className="flex flex-wrap gap-4 mb-6 border-b border-slate-200 dark:border-white/10 pb-4">
         <button 
-          onClick={() => setActiveTab('transactions')} 
+          onClick={() => { setActiveTab('transactions'); setPage(1); }} 
           className={`px-4 py-2 rounded-lg font-bold text-xs uppercase tracking-widest transition-all ${activeTab === 'transactions' ? 'bg-emerald-500 text-white shadow-lg shadow-emerald-500/20' : 'text-slate-500 dark:text-gray-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-white/5'}`}
         >
           Журнал транзакций
@@ -57,14 +64,6 @@ export default function ReportsDashboard() {
         >
           Отчет кассиров
         </button>
-        {user?.role !== 'cashier' && (
-          <button 
-            onClick={() => setActiveTab('finance')} 
-            className={`px-4 py-2 rounded-lg font-bold text-xs uppercase tracking-widest transition-all ${activeTab === 'finance' ? 'bg-blue-500 text-white shadow-lg shadow-blue-500/20' : 'text-slate-500 dark:text-gray-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-white/5'}`}
-          >
-            Финансы и Аналитика
-          </button>
-        )}
       </div>
 
       {activeTab === 'shifts' && <CashierReport />}
@@ -104,24 +103,22 @@ export default function ReportsDashboard() {
               <table className="w-full text-left text-sm text-slate-500 dark:text-gray-400">
                 <thead className="text-[10px] uppercase bg-slate-50 dark:bg-black/40 text-slate-500 dark:text-gray-500 font-black tracking-widest">
                   <tr>
-                    <th className="px-6 py-5">ID</th>
-                    <th className="px-6 py-5">Кассир</th>
+                    <th className="px-6 py-5">Детали операции</th>
                     <th className="px-6 py-5">Станция / Коннектор</th>
                     <th className="px-6 py-5 text-emerald-600 dark:text-emerald-400">Энергия</th>
                     <th className="px-6 py-5 text-slate-900 dark:text-white">Сумма</th>
-                    <th className="px-6 py-5 text-right">Дата и время</th>
+                    <th className="px-6 py-5 text-right">Статус</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 dark:divide-white/5">
                   {data.map((tx) => (
                     <tr key={tx.id} className="hover:bg-slate-50 dark:hover:bg-white/5 transition-colors group">
-                      <td className="px-6 py-4 font-mono text-xs text-slate-400 dark:text-gray-500">#{tx.id}</td>
                       <td className="px-6 py-4">
-                        <div className="flex items-center gap-2">
-                          <div className="w-6 h-6 rounded-full bg-slate-100 dark:bg-white/5 flex items-center justify-center text-[10px] font-black text-blue-600 dark:text-blue-400 border border-slate-200 dark:border-white/10">
-                            {tx.cashier_name?.[0].toUpperCase() || 'A'}
-                          </div>
-                          <span className="font-bold text-slate-700 dark:text-white text-xs uppercase tracking-tight">{tx.cashier_name || 'Автономно'}</span>
+                        <div className="text-[11px] font-bold text-slate-700 dark:text-white uppercase tracking-tight">
+                          Кассир <span className="text-emerald-500">{tx.cashier_name || 'Система'}</span> {new Date(tx.created_at).toLocaleDateString('ru-RU')} в {new Date(tx.created_at).toLocaleTimeString('ru-RU', {hour: '2-digit', minute:'2-digit'})}
+                        </div>
+                        <div className="text-[10px] text-slate-400 dark:text-gray-500 font-medium">
+                          Зарядил машину на колонке {tx.station_name || 'N/A'} (#{tx.id})
                         </div>
                       </td>
                       <td className="px-6 py-4">
@@ -136,14 +133,16 @@ export default function ReportsDashboard() {
                           {tx.amount_tjs?.toFixed(2)} <span className="text-[10px] opacity-40">TJS</span>
                         </span>
                       </td>
-                      <td className="px-6 py-4 text-right text-[10px] font-bold text-slate-400 dark:text-gray-500 uppercase tracking-tighter">
-                        {new Date(tx.created_at).toLocaleString('ru-RU')}
+                      <td className="px-6 py-4 text-right">
+                        <span className={`text-[9px] font-black uppercase px-2 py-1 rounded ${tx.status === 'completed' ? 'bg-emerald-500/10 text-emerald-500' : 'bg-amber-500/10 text-amber-500'}`}>
+                          {tx.status}
+                        </span>
                       </td>
                     </tr>
                   ))}
                   {data.length === 0 && (
                     <tr>
-                      <td colSpan={6} className="px-6 py-20 text-center text-slate-400 dark:text-gray-500 uppercase text-xs font-black tracking-widest">
+                      <td colSpan={5} className="px-6 py-20 text-center text-slate-400 dark:text-gray-500 uppercase text-xs font-black tracking-widest">
                         Нет данных за выбранный период
                       </td>
                     </tr>
@@ -181,74 +180,6 @@ export default function ReportsDashboard() {
         </>
       )}
 
-      {activeTab === 'finance' && analytics && (
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 animate-in fade-in duration-500">
-          {/* Доход по месяцам */}
-          <div className="bg-white dark:bg-[#1a1f2e] p-8 rounded-3xl border border-slate-200 dark:border-white/10 shadow-sm dark:shadow-2xl">
-            <h3 className="text-slate-900 dark:text-white font-black mb-6 uppercase tracking-widest text-xs flex items-center gap-2">
-              <div className="w-2 h-2 rounded-full bg-blue-500"></div>
-              Доход по месяцам
-            </h3>
-            <div className="space-y-4">
-              {analytics.byMonth.map((m: any) => (
-                <div key={m.period} className="flex justify-between items-center bg-slate-50 dark:bg-black/20 p-4 rounded-xl border border-slate-100 dark:border-white/5 hover:border-blue-500/30 transition-all group">
-                  <span className="text-slate-500 dark:text-gray-400 font-mono font-bold group-hover:text-slate-900 dark:group-hover:text-white transition-colors">{m.period}</span>
-                  <div className="text-right">
-                    <div className="text-emerald-600 dark:text-emerald-400 font-black text-lg">{m.revenue?.toFixed(2)} <span className="text-[10px] opacity-50">TJS</span></div>
-                    <div className="text-[10px] text-slate-400 dark:text-gray-500 uppercase font-black">{m.sessions} сессий / {m.kwh?.toFixed(1)} kWh</div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-          
-          {/* Рейтинг кассиров */}
-          <div className="bg-white dark:bg-[#1a1f2e] p-8 rounded-3xl border border-slate-200 dark:border-white/10 shadow-sm dark:shadow-2xl">
-            <h3 className="text-slate-900 dark:text-white font-black mb-6 uppercase tracking-widest text-xs flex items-center gap-2">
-              <div className="w-2 h-2 rounded-full bg-emerald-500"></div>
-              Выручка по сотрудникам
-            </h3>
-            <div className="space-y-4">
-              {analytics.byCashier.map((c: any, i: number) => (
-                <div key={i} className="flex justify-between items-center bg-slate-50 dark:bg-black/20 p-4 rounded-xl border border-slate-100 dark:border-white/5 hover:border-emerald-500/30 transition-all group">
-                  <div className="flex items-center gap-4">
-                    <div className={`w-10 h-10 rounded-xl flex items-center justify-center font-black text-sm border transition-all ${i === 0 ? 'bg-emerald-500/10 dark:bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 border-emerald-200 dark:border-emerald-500/30' : 'bg-slate-100 dark:bg-white/5 text-slate-400 dark:text-gray-400 border-slate-200 dark:border-white/10'}`}>
-                      {i + 1}
-                    </div>
-                    <div className="text-left">
-                      <span className="text-slate-700 dark:text-white font-black uppercase text-xs tracking-widest block">{c.name || 'Автономно'}</span>
-                      <span className="text-[10px] text-slate-400 dark:text-gray-500 font-bold uppercase">{c.sessions} сессий проведено</span>
-                    </div>
-                  </div>
-                  <span className="text-emerald-600 dark:text-emerald-400 font-black text-lg">{c.revenue?.toFixed(2)} <span className="text-[10px] opacity-50">TJS</span></span>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          {/* Доход по станциям */}
-          <div className="lg:col-span-2 bg-white dark:bg-[#1a1f2e] p-8 rounded-3xl border border-slate-200 dark:border-white/10 shadow-sm dark:shadow-2xl">
-            <h3 className="text-slate-900 dark:text-white font-black mb-6 uppercase tracking-widest text-xs flex items-center gap-2">
-              <div className="w-2 h-2 rounded-full bg-amber-500"></div>
-              Эффективность станций
-            </h3>
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              {analytics.byStation.map((s: any, i: number) => (
-                <div key={i} className="bg-slate-50 dark:bg-black/20 p-5 rounded-2xl border border-slate-100 dark:border-white/5 hover:border-amber-500/30 transition-all">
-                  <div className="flex justify-between items-start mb-4">
-                    <span className="text-slate-700 dark:text-white font-black uppercase text-[10px] tracking-widest bg-slate-100 dark:bg-white/5 px-2 py-1 rounded border border-slate-200 dark:border-white/5">{s.name}</span>
-                    <span className="text-amber-600 dark:text-amber-400 font-black font-mono text-sm">{s.revenue?.toFixed(0)} TJS</span>
-                  </div>
-                  <div className="flex justify-between items-center text-[10px] font-bold text-slate-400 dark:text-gray-500 uppercase">
-                    <span>Потребление</span>
-                    <span className="text-slate-600 dark:text-gray-300 font-mono">{s.kwh?.toFixed(1)} kWh</span>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }

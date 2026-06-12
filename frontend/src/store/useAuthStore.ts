@@ -26,7 +26,12 @@ export const useAuthStore = create<AuthState>()(
           throw error;
         }
       },
-      logout: () => set({ user: null }),
+      logout: () => {
+        set({ user: null });
+        localStorage.clear();
+        sessionStorage.clear();
+        window.location.href = '/login';
+      },
     }),
     {
       name: 'auth-storage',

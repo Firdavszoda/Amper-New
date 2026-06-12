@@ -7,26 +7,39 @@ const buildWhere = (user: any, q: any) => {
   const conditions = [];
   const params: any[] = [];
 
-  // Изоляция: Кассир видит только свои транзакции. Админ/Бухгалтер - все.
-  // user.role из БД: 'admin', 'cashier', 'financier'
+  // Изоляция: Кассир видит только свои транзакции. Админ/Бухгалтер (Financier) - все.
   if (user && user.role === 'cashier') {
     conditions.push('sh.user_id = ?');
     params.push(user.id);
-  } else if (q.cashier_id) {
-    conditions.push('sh.user_id = ?');
-    params.push(q.cashier_id);
+  } else if (q.cashierId && q.cashierId !== 'all') {
+    // В зависимости от того, передаем ID или Username
+    if (isNaN(parseInt(q.cashierId))) {
+      conditions.push('u.username = ?');
+    } else {
+      conditions.push('sh.user_id = ?');
+    }
+    params.push(q.cashierId);
+  } else if (q.cashier && q.cashier !== 'all') {
+    conditions.push('u.username = ?');
+    params.push(q.cashier);
   }
 
-  if (q.station_id) {
+  if (q.station_id && q.station_id !== 'all') {
     conditions.push('c.station_id = ?');
     params.push(q.station_id);
+  } else if (q.stationId && q.stationId !== 'all') {
+    conditions.push('c.station_id = ?');
+    params.push(q.stationId);
   }
-  if (q.startDate) {
-    conditions.push('t.created_at >= ?');
+
+  if (q.startDate && q.endDate) {
+    conditions.push('t.created_at >= datetime(? || " 00:00:00") AND t.created_at <= datetime(? || " 23:59:59")');
+    params.push(q.startDate, q.endDate);
+  } else if (q.startDate) {
+    conditions.push('t.created_at >= datetime(? || " 00:00:00")');
     params.push(q.startDate);
-  }
-  if (q.endDate) {
-    conditions.push('t.created_at <= ?');
+  } else if (q.endDate) {
+    conditions.push('t.created_at <= datetime(? || " 23:59:59")');
     params.push(q.endDate);
   }
 
@@ -214,14 +227,14 @@ router.get('/shifts', async (req: any, res) => {
 });
 
 // НОВЫЙ ОТЧЕТ КАССИРОВ (с фильтрами)
-router.get('/cashiers', async (req, res) => {
-  console.log('✅ ЗАПРОС ДОШЕЛ ДО ОТЧЕТОВ:', req.query); // Маркер
+router.get('/cashiers', async (req: any, res) => {
+  console.log('✅ ЗАПРОС ДОШЕЛ ДО ОТЧЕТОВ:', req.query); 
   const { startDate, endDate, stationId, cashier } = req.query;
   try {
     const db = await getDB();
     
     let query = `
-      SELECT t.*, c.name as connector_name, s.name as station_name 
+      SELECT t.*, c.name as connector_name, s.name as station_name, u.username as cashier_name 
       FROM transactions t
       LEFT JOIN connectors c ON t.connector_id = c.id
       LEFT JOIN stations s ON c.station_id = s.id
@@ -231,20 +244,29 @@ router.get('/cashiers', async (req, res) => {
     `;
     const params: any[] = [];
 
-    // Фильтр по диапазону дат (включая время от начала первого дня до конца второго)
-    if (startDate && endDate) {
-      query += ` AND t.stop_time >= datetime(? || ' 00:00:00') AND t.stop_time <= datetime(? || ' 23:59:59')`;
-      params.push(startDate, endDate);
+    // RBAC: Кассир видит только себя
+    if (req.user && req.user.role === 'cashier') {
+      query += ` AND sh.user_id = ?`;
+      params.push(req.user.id);
+    } else if (cashier && cashier !== 'all') { 
+      // Фильтр по кассиру (для Админа/Финансиста)
+      query += ` AND u.username = ?`; 
+      params.push(cashier); 
     }
+
+    // Фильтр по диапазону дат
+    if (startDate && endDate) {
+      query += ` AND t.created_at >= datetime(? || ' 00:00:00') AND t.created_at <= datetime(? || ' 23:59:59')`;
+      params.push(startDate, endDate);
+    } else if (startDate) {
+      query += ` AND t.created_at >= datetime(? || ' 00:00:00')`;
+      params.push(startDate);
+    }
+    
     // Фильтр по станции
     if (stationId && stationId !== 'all') {
       query += ` AND s.id = ?`;
       params.push(stationId);
-    }
-    // Фильтр по кассиру
-    if (cashier && cashier !== 'all') { 
-      query += ` AND u.username = ?`; 
-      params.push(cashier); 
     }
 
     query += ` ORDER BY t.created_at DESC`;

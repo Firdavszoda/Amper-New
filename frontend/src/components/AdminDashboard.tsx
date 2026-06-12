@@ -177,36 +177,6 @@ const AdminDashboard: React.FC = () => {
         <StatCard label="Активные сессии" value={analytics?.totalSessions || 0} icon={<Zap />} color="blue" />
         <StatCard label="Средний чек" value={analytics?.avgCheck || "0.00"} suffix="TJS" icon={<Activity />} color="amber" />
       </div>
-      
-      <div className="grid grid-cols-1 xl:grid-cols-3 gap-8">
-        <div className="xl:col-span-2 bg-white dark:bg-app-card rounded-[2.5rem] border border-slate-200 dark:border-app-border p-8 shadow-sm dark:shadow-2xl text-left">
-          <h3 className="text-lg font-black text-slate-900 dark:text-white uppercase mb-8 flex items-center gap-3 tracking-tighter">
-            <ShieldAlert className="w-6 h-6 text-red-500 animate-pulse" /> Системный журнал
-          </h3>
-          <SecurityTable logs={analytics?.securityLogs?.slice(0, 6)} compact />
-        </div>
-        
-        <div className="bg-blue-600 rounded-[2.5rem] p-8 text-white relative overflow-hidden shadow-2xl shadow-blue-500/30 text-left">
-          <div className="relative z-10 space-y-6">
-            <h3 className="text-xl font-black uppercase tracking-tighter">Состояние узла</h3>
-            <div className="space-y-4">
-              <div className="flex justify-between items-center bg-white/10 p-4 rounded-2xl backdrop-blur-md">
-                <span className="text-xs font-bold uppercase opacity-70">Аптайм</span>
-                <span className="font-mono font-black text-sm">99.9%</span>
-              </div>
-              <div className="flex justify-between items-center bg-white/10 p-4 rounded-2xl backdrop-blur-md">
-                <span className="text-xs font-bold uppercase opacity-70">Задержка</span>
-                <span className="font-mono font-black text-sm text-emerald-300">12мс</span>
-              </div>
-              <div className="flex justify-between items-center bg-white/10 p-4 rounded-2xl backdrop-blur-md">
-                <span className="text-xs font-bold uppercase opacity-70">Статус API</span>
-                <span className="flex items-center gap-2 font-black text-[10px] uppercase tracking-widest"><span className="w-2 h-2 bg-emerald-400 rounded-full animate-pulse" /> В сети</span>
-              </div>
-            </div>
-          </div>
-          <Signal className="absolute -right-12 -bottom-12 w-64 h-64 opacity-10 rotate-12" />
-        </div>
-      </div>
     </div>
   );
 
