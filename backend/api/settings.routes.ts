@@ -16,7 +16,8 @@ router.get('/all', async (req, res) => {
 
     res.json({ 
       price_per_kwh: globalPricePerKwh,
-      stop_reserve_wh: settingsObj.stop_reserve_wh || 50
+      global_reserve_tjs: settingsObj.global_reserve_tjs || "0.20",
+      meter_interval_sec: settingsObj.meter_interval_sec || "2"
     });
   } catch (e) {
     res.status(500).json({ error: 'Ошибка БД' });
@@ -69,8 +70,8 @@ router.post('/price', async (req: any, res: any) => {
 
 // Обновить резерв
 router.post('/reserve', async (req: any, res: any) => {
-  const { stop_reserve_wh } = req.body;
-  const reserve = typeof stop_reserve_wh === 'string' ? parseFloat(stop_reserve_wh) : stop_reserve_wh;
+  const { global_reserve_tjs } = req.body;
+  const reserve = typeof global_reserve_tjs === 'string' ? parseFloat(global_reserve_tjs) : global_reserve_tjs;
 
   if (typeof reserve !== 'number' || isNaN(reserve) || reserve < 0) {
     return res.status(400).json({ error: 'Неверное значение резерва' });
@@ -79,26 +80,52 @@ router.post('/reserve', async (req: any, res: any) => {
   try {
     const db = await getDB();
     await db.run(
-      `INSERT INTO settings (key, value) VALUES ('stop_reserve_wh', ?) 
+      `INSERT INTO settings (key, value) VALUES ('global_reserve_tjs', ?) 
        ON CONFLICT(key) DO UPDATE SET value = ?`,
       [reserve.toString(), reserve.toString()]
     );
-    await loadGlobalPrice();
-
-    // РАССЫЛКА НОВОГО РЕЗЕРВА НА ВСЕ СТАНЦИИ
-    if (activeConnections.size > 0) {
-      console.log(`📢 Рассылка нового резерва (${reserve} Wh) на ${activeConnections.size} станций...`);
-      for (const [serial, ws] of activeConnections.entries()) {
-        sendOcppCommandAndWait(ws, "ChangeConfiguration", { 
-          key: "StopReserveWh", 
-          value: String(reserve) 
-        }).catch(err => console.error(`❌ Ошибка обновления резерва на ${serial}:`, err.message));
-      }
-    }
-
+    
+    // Примечание: Мы больше не рассылаем резерв на станцию через ChangeConfiguration, 
+    // так как теперь это чисто серверная логика в TJS (MeterValues).
+    
     res.json({ success: true, new_reserve: reserve });
   } catch (error) {
     console.error('Ошибка сохранения резерва:', error);
+    res.status(500).json({ error: 'Ошибка БД' });
+  }
+});
+
+// Обновить интервал
+router.post('/meter-interval', async (req: any, res: any) => {
+  const { meter_interval_sec } = req.body;
+  const interval = typeof meter_interval_sec === 'string' ? parseInt(meter_interval_sec) : meter_interval_sec;
+
+  if (typeof interval !== 'number' || isNaN(interval) || interval <= 0) {
+    return res.status(400).json({ error: 'Неверное значение интервала' });
+  }
+
+  try {
+    const db = await getDB();
+    await db.run(
+      `INSERT INTO settings (key, value) VALUES ('meter_interval_sec', ?) 
+       ON CONFLICT(key) DO UPDATE SET value = ?`,
+      [interval.toString(), interval.toString()]
+    );
+
+    // РАССЫЛКА НОВОГО ИНТЕРВАЛА НА ВСЕ СТАНЦИИ
+    if (activeConnections.size > 0) {
+      console.log(`📢 Рассылка нового интервала (${interval} сек) на ${activeConnections.size} станций...`);
+      for (const [serial, ws] of activeConnections.entries()) {
+        sendOcppCommandAndWait(ws, "ChangeConfiguration", { 
+          key: "MeterValueSampleInterval", 
+          value: String(interval) 
+        }).catch(err => console.error(`❌ Ошибка обновления интервала на ${serial}:`, err.message));
+      }
+    }
+
+    res.json({ success: true, new_interval: interval });
+  } catch (error) {
+    console.error('Ошибка сохранения интервала:', error);
     res.status(500).json({ error: 'Ошибка БД' });
   }
 });

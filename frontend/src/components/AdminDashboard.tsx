@@ -24,13 +24,15 @@ const AdminDashboard: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [price, setPrice] = useState<number | string>('');
   const [reserve, setReserve] = useState<number | string>('');
+  const [interval, setInterval] = useState<number | string>('');
   const [isSavingPrice, setIsSavingPrice] = useState(false);
 
   const fetchPrice = async () => {
     try {
       const data = await api.getSettings();
       setPrice(data.price_per_kwh);
-      setReserve(data.stop_reserve_wh);
+      setReserve(data.global_reserve_tjs);
+      setInterval(data.meter_interval_sec);
     } catch (e) {
       console.error("Ошибка загрузки настроек:", e);
     }
@@ -54,7 +56,8 @@ const AdminDashboard: React.FC = () => {
     try {
       await Promise.all([
         api.updatePrice(parseFloat(price as string)),
-        api.updateReserve(parseFloat(reserve as string))
+        api.updateReserve(parseFloat(reserve as string)),
+        api.updateMeterInterval(parseInt(interval as string))
       ]);
       alert('Настройки успешно обновлены во всей системе!');
     } catch (e) {
@@ -108,7 +111,7 @@ const AdminDashboard: React.FC = () => {
       
       {/* УПРАВЛЕНИЕ ТАРИФОМ И РЕЗЕРВОМ */}
       <div className="bg-white dark:bg-app-card border border-slate-200 dark:border-app-border p-8 rounded-[2.5rem] shadow-sm dark:shadow-xl">
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-10">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-10">
           <div className="flex flex-col justify-between items-start gap-6">
             <div className="text-left">
               <h3 className="text-lg font-black text-slate-900 dark:text-white uppercase tracking-tighter flex items-center gap-2">
@@ -129,16 +132,33 @@ const AdminDashboard: React.FC = () => {
           <div className="flex flex-col justify-between items-start gap-6">
             <div className="text-left">
               <h3 className="text-lg font-black text-slate-900 dark:text-white uppercase tracking-tighter flex items-center gap-2">
-                <ShieldCheck className="w-5 h-5 text-blue-500" /> Глобальный резерв (Wh)
+                <ShieldCheck className="w-5 h-5 text-blue-500" /> Глобальный резерв (TJS)
               </h3>
-              <p className="text-[10px] text-slate-500 dark:text-app-muted font-bold uppercase tracking-widest mt-1 text-left">Остановка за Х Ватт-час до лимита</p>
+              <p className="text-[10px] text-slate-500 dark:text-app-muted font-bold uppercase tracking-widest mt-1 text-left">ОСТАНОВКА ЗА X TJS ДО ЛИМИТА (НАПР. 0.20)</p>
+            </div>
+            <div className="w-full relative">
+              <input 
+                type="number" step="0.01"
+                value={reserve}
+                onChange={(e) => setReserve(e.target.value)}
+                className="w-full bg-slate-50 dark:bg-app-bg border border-slate-200 dark:border-app-border rounded-2xl px-6 py-4 text-slate-900 dark:text-white font-black text-xl focus:outline-none focus:border-blue-500 transition-all"
+              />
+            </div>
+          </div>
+
+          <div className="flex flex-col justify-between items-start gap-6">
+            <div className="text-left">
+              <h3 className="text-lg font-black text-slate-900 dark:text-white uppercase tracking-tighter flex items-center gap-2">
+                <Activity className="w-5 h-5 text-amber-500" /> ИНТЕРВАЛ ОТПРАВКИ (СЕК)
+              </h3>
+              <p className="text-[10px] text-slate-500 dark:text-app-muted font-bold uppercase tracking-widest mt-1 text-left">КАК ЧАСТО СТАНЦИЯ ШЛЕТ ДАННЫЕ (ОБЫЧНО 2 СЕК)</p>
             </div>
             <div className="w-full relative">
               <input 
                 type="number" step="1"
-                value={reserve}
-                onChange={(e) => setReserve(e.target.value)}
-                className="w-full bg-slate-50 dark:bg-app-bg border border-slate-200 dark:border-app-border rounded-2xl px-6 py-4 text-slate-900 dark:text-white font-black text-xl focus:outline-none focus:border-blue-500 transition-all"
+                value={interval}
+                onChange={(e) => setInterval(e.target.value)}
+                className="w-full bg-slate-50 dark:bg-app-bg border border-slate-200 dark:border-app-border rounded-2xl px-6 py-4 text-slate-900 dark:text-white font-black text-xl focus:outline-none focus:border-amber-500 transition-all"
               />
             </div>
           </div>

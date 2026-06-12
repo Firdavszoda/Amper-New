@@ -113,7 +113,8 @@ export async function initDB() {
   // Установка настроек по умолчанию
   await dbInstance.run(`INSERT OR IGNORE INTO settings (key, value) VALUES ('smart_stop_reserve_sec', '20')`);
   await dbInstance.run(`INSERT OR IGNORE INTO settings (key, value) VALUES ('price_per_kwh', '3.6')`);
-  await dbInstance.run(`INSERT OR IGNORE INTO settings (key, value) VALUES ('stop_reserve_wh', '200')`);
+  await dbInstance.run(`INSERT OR IGNORE INTO settings (key, value) VALUES ('global_reserve_tjs', '0.20')`);
+  await dbInstance.run(`INSERT OR IGNORE INTO settings (key, value) VALUES ('meter_interval_sec', '2')`);
 
   await seedInitialData();
   console.log('✅ База данных SQLite успешно инициализирована (Защита уровня PRO + Смены + Ручки + Логи)!');

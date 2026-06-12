@@ -5,7 +5,7 @@ import { getDB } from '../database/db';
 
 export const activeConnections = new Map<string, WebSocket>();
 export let globalPricePerKwh = 3.6;
-export let globalReserveWh = 50; 
+export let globalReserveTjs = 0.20; 
 
 export const loadGlobalPrice = async () => {
   try {
@@ -13,10 +13,10 @@ export const loadGlobalPrice = async () => {
     const priceSetting = await db.get(`SELECT value FROM settings WHERE key = 'price_per_kwh'`);
     if (priceSetting) globalPricePerKwh = parseFloat(priceSetting.value);
     
-    const reserveSetting = await db.get(`SELECT value FROM settings WHERE key = 'stop_reserve_wh'`);
-    if (reserveSetting) globalReserveWh = parseFloat(reserveSetting.value);
+    const reserveSetting = await db.get(`SELECT value FROM settings WHERE key = 'global_reserve_tjs'`);
+    if (reserveSetting) globalReserveTjs = parseFloat(reserveSetting.value);
     
-    console.log(`💰 Тариф: ${globalPricePerKwh} | 🛡 Резерв: ${globalReserveWh} Wh`);
+    console.log(`💰 Тариф: ${globalPricePerKwh} | 🛡 Резерв: ${globalReserveTjs} TJS`);
   } catch (e) { console.error('Ошибка загрузки настроек', e); }
 };
 
@@ -65,15 +65,22 @@ export function setupOcppServer(server: HttpServer, io: SocketIOServer) {
                   const priceSetting = await db.get(`SELECT value FROM settings WHERE key = 'price_per_kwh'`);
                   const currentTariff = priceSetting ? priceSetting.value : String(globalPricePerKwh);
 
+                  const intervalSetting = await db.get('SELECT value FROM settings WHERE key = "meter_interval_sec"');
+                  const intervalValue = intervalSetting ? intervalSetting.value : "2";
+
                   ws.send(JSON.stringify([2, `config-boot-tariff-${Date.now()}`, "ChangeConfiguration", { 
                     key: "TariffPrice", 
                     value: String(currentTariff) 
                   }]));
 
-                  ws.send(JSON.stringify([2, `config-boot-interval-${Date.now()}`, "ChangeConfiguration", { key: "MeterValueSampleInterval", value: "5" }]));
+                  ws.send(JSON.stringify([2, `config-boot-interval-${Date.now()}`, "ChangeConfiguration", { 
+                    key: "MeterValueSampleInterval", 
+                    value: String(intervalValue) 
+                  }]));
+                  
                   ws.send(JSON.stringify([2, `config-boot-data-${Date.now()}`, "ChangeConfiguration", { key: "MeterValuesSampledData", value: "Energy.Active.Import.Register,Power.Active.Import,SoC" }]));
                   
-                  console.log(`⚙️ Станция ${stationId} синхронизирована. Тариф: ${currentTariff}`);
+                  console.log(`⚙️ Станция ${stationId} синхронизирована. Тариф: ${currentTariff}, Интервал: ${intervalValue}с`);
                 } catch(e) {
                   console.error("Ошибка при отправке настроек на Boot:", e);
                 }
@@ -201,39 +208,37 @@ export function setupOcppServer(server: HttpServer, io: SocketIOServer) {
             }
 
             const db = await getDB();
-            const tx = await db.get('SELECT meter_start, target_amount FROM transactions WHERE id = ?', [transactionId]);
-            
-            if (tx) {
-                const consumedKwh = Math.max(0, (currentMeter - (tx.meter_start || 0)) / 1000);
-                const currentTjs = consumedKwh * globalPricePerKwh;
+            const tx_info = await db.get('SELECT meter_start FROM transactions WHERE id = ?', [transactionId]);
+            const current_kwh = tx_info ? Math.max(0, (currentMeter - (tx_info.meter_start || 0)) / 1000) : 0;
+            const current_tjs = current_kwh * globalPricePerKwh;
 
-                // Резерв в сомони (например, 200Wh * 3.6 = 0.72 TJS)
-                // Это "базовый" защитный слой.
-                const baseReserveTjs = (globalReserveWh / 1000) * globalPricePerKwh;
-                
-                // Динамический резерв: сколько будет потреблено за следующие 5-10 секунд при текущей мощности
-                // (если мощность 160кВт, то за 5 сек это ~222Wh или 0.8 TJS)
-                const powerReserveTjs = (currentPower > 0) ? (currentPower * (5/3600) / 1000) * globalPricePerKwh : 0;
-                
-                // Итоговый резерв - берем большее из двух
-                const totalReserveTjs = Math.max(baseReserveTjs, powerReserveTjs);
+            try {
+                // 1. Получаем транзакцию
+                const tx = await db.get('SELECT target_amount FROM transactions WHERE id = ?', [transactionId]);
+                // 2. Получаем резерв в TJS (дефолт 0, если не найдено)
+                const reserveSetting = await db.get('SELECT value FROM settings WHERE key = "global_reserve_tjs"');
+                const reserve_tjs = reserveSetting ? parseFloat(reserveSetting.value) : 0;
 
-                // СТРОГИЙ АВТОСТОП: Останавливаем заранее. 
-                // Если текущая сумма + резерв уже близко к лимиту - СТОП.
-                if (tx.target_amount > 0 && currentTjs >= (tx.target_amount - totalReserveTjs)) {
-                    console.log(`🛡 СТРОГИЙ АВТОСТОП: Лимит ${tx.target_amount}. Сумма ${currentTjs.toFixed(2)}. Резерв ${totalReserveTjs.toFixed(2)}. СТОП!`);
+                // 3. Строгая проверка с учетом резерва
+                if (tx && tx.target_amount > 0 && current_tjs >= (tx.target_amount - reserve_tjs)) {
+                    console.log(`🛑 СТОП: Достигнут лимит с учетом резерва. (Текущая сумма: ${current_tjs}, Лимит: ${tx.target_amount}, Резерв: ${reserve_tjs})`);
                     sendOcppCommandAndWait(ws, "RemoteStopTransaction", { transactionId }).catch(() => {});
+                } else {
+                    await db.run('UPDATE transactions SET consumed_kwh = ?, amount_tjs = ? WHERE id = ?', 
+                                 [current_kwh, current_tjs, transactionId]);
                 }
-
-                // Рассылаем данные в UI
-                io.emit('charging_update', { 
-                  connectorId, 
-                  transactionId, 
-                  kwh: Number(consumedKwh.toFixed(3)), 
-                  tjs: Number(currentTjs.toFixed(2)), 
-                  soc 
-                });
+            } catch (e) {
+                console.error("Ошибка проверки лимита:", e);
             }
+
+            // Рассылаем данные в UI
+            io.emit('charging_update', { 
+              connectorId, 
+              transactionId, 
+              kwh: Number(current_kwh.toFixed(3)), 
+              tjs: Number(current_tjs.toFixed(2)), 
+              soc 
+            });
           }
 
           if (action === 'StopTransaction') {

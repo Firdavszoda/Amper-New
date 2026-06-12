@@ -89,10 +89,11 @@ export const api = {
   closeShift: (shiftId: number) => request<any>('/shifts/close', { method: 'POST', body: JSON.stringify({ shiftId }) }),
 
   // Settings
-  getSettings: () => request<{ price_per_kwh: number; stop_reserve_wh: number }>('/settings/all'),
+  getSettings: () => request<{ price_per_kwh: number; global_reserve_tjs: number; meter_interval_sec: number }>('/settings/all'),
   getPrice: () => request<{ price_per_kwh: number }>('/settings/price'),
   updatePrice: (price_per_kwh: number) => request<any>('/settings/price', { method: 'POST', body: JSON.stringify({ price_per_kwh }) }),
-  updateReserve: (stop_reserve_wh: number) => request<any>('/settings/reserve', { method: 'POST', body: JSON.stringify({ stop_reserve_wh }) }),
+  updateReserve: (global_reserve_tjs: number) => request<any>('/settings/reserve', { method: 'POST', body: JSON.stringify({ global_reserve_tjs }) }),
+  updateMeterInterval: (meter_interval_sec: number) => request<any>('/settings/meter-interval', { method: 'POST', body: JSON.stringify({ meter_interval_sec }) }),
 
   // Reports
   reports: {
